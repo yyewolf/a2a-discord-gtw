@@ -91,13 +91,15 @@ func (g *Gateway) pollAgent(ctx context.Context, a *Agent) error {
 }
 
 // surface shows a task's changes since it was last shown: new reply text,
-// its state, and a new pending request.
+// its state, and a new pending request. It never waits for a conversation
+// busy with a turn: the task is deferred to the next poll, and everything is
+// read again under the lock, so what a turn just posted is not posted twice.
 func (g *Gateway) surface(ctx context.Context, a *Agent, t *a2a.Task) error {
 	rec, known, err := g.store.Task(ctx, string(t.ID))
 	if err != nil {
 		return err
 	}
-	if known && rec.State == string(t.Status.State) && t.Status.State != a2a.TaskStateInputRequired {
+	if known && unchanged(rec, t) {
 		return nil
 	}
 	full, err := a.Client.Task(ctx, t.ID)
@@ -108,8 +110,17 @@ func (g *Gateway) surface(ctx context.Context, a *Agent, t *a2a.Task) error {
 	if err != nil {
 		return err
 	}
-	unlock := g.conv.lock(snowflake.ID(conv.ThreadID))
+	unlock, ok := g.conv.tryLock(snowflake.ID(conv.ThreadID))
+	if !ok {
+		return errDeferred
+	}
 	defer unlock()
+	if rec, _, err = g.store.Task(ctx, string(t.ID)); err != nil {
+		return err
+	}
+	if full, err = a.Client.Task(ctx, t.ID); err != nil {
+		return err
+	}
 	text := []rune(kagent.TaskText(full))
 	if rec.PostedLen < len(text) {
 		for _, c := range render.Chunk(string(text[rec.PostedLen:]), render.MessageLimit) {
@@ -117,7 +128,13 @@ func (g *Gateway) surface(ctx context.Context, a *Agent, t *a2a.Task) error {
 		}
 	}
 	g.showState(ctx, conv, full.Status.State)
-	return g.settle(ctx, a, conv, full, len(text))
+	return g.settle(ctx, a, conv, full, max(len(text), rec.PostedLen))
+}
+
+// unchanged reports whether a task is as it was last shown. A task waiting
+// for input is always looked at: its request may have been replaced.
+func unchanged(rec store.TaskRecord, t *a2a.Task) bool {
+	return rec.State == string(t.Status.State) && t.Status.State != a2a.TaskStateInputRequired
 }
 
 // conversationFor returns the conversation of a task's context, opening one

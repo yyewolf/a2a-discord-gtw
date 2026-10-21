@@ -12,6 +12,8 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 
+	"github.com/yyewolf/a2a-discord-gtw/internal/bot"
+
 	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
 )
 
@@ -207,5 +209,60 @@ func TestWatchDefersWhileAConversationStarts(t *testing.T) {
 	}
 	if got := h.discord.in(thread); len(got) != 1 || got[0].Content != "hi" {
 		t.Fatalf("thread = %+v", got)
+	}
+}
+
+// While a conversation is busy with a turn, polling does not wait for it,
+// and what changed is shown once the turn is over.
+func TestWatchSkipsABusyConversation(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	ctx := context.Background()
+	h.gw.Poll(ctx)
+	w := h.agents["windmill-maintainer"]
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	w.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		close(entered)
+		<-release
+		return reply("t1", "ctx-1", "turn reply"), nil
+	}
+	var wg sync.WaitGroup
+	thread := h.discord.userMessage(h.channel("windmill-maintainer"), "go")
+	wg.Go(func() {
+		h.gw.HandleMessage(ctx, bot.Message{ID: thread, ChannelID: h.channel("windmill-maintainer"), GuildID: guildID, AuthorID: ownerID, Content: "go"})
+	})
+	<-entered
+	// The context gets named before the turn's events reach the bot.
+	if err := h.store.SetConversationContext(ctx, uint64(thread), "ctx-1"); err != nil {
+		t.Fatal(err)
+	}
+	w.put(&a2a.Task{
+		ID: "t2", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted, Timestamp: new(time.Now().Add(time.Second))},
+		Artifacts: []*a2a.Artifact{{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("side task")}}},
+	})
+
+	polled := make(chan struct{})
+	go func() {
+		h.gw.Poll(ctx)
+		close(polled)
+	}()
+	select {
+	case <-polled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("polling waited for a busy conversation")
+	}
+	close(release)
+	wg.Wait()
+	h.gw.Poll(ctx)
+	h.gw.Poll(ctx)
+	var side int
+	for _, m := range h.discord.in(thread) {
+		if m.Content == "side task" {
+			side++
+		}
+	}
+	if side != 1 {
+		t.Fatalf("side task posted %d times: %+v", side, h.discord.in(thread))
 	}
 }
