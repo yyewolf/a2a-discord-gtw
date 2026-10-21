@@ -22,20 +22,21 @@ func TestPartials(t *testing.T) {
 	if err := s.SetPartial(ctx, "t", "other", 0, []string{"stale"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Partials(ctx, "t", "req")
-	if err != nil || len(got) != 2 {
-		t.Fatalf("got %v, %v", got, err)
+	got, ok, err := s.TakePartials(ctx, "t", "req", 2)
+	if err != nil || !ok || len(got) != 2 {
+		t.Fatalf("got %v, %v, %v", got, ok, err)
 	}
 	var first []string
 	_ = json.Unmarshal(got[0], &first)
 	if len(first) != 2 || first[1] != "Green" {
 		t.Fatalf("first = %v", first)
 	}
-	if err := s.ClearPartials(ctx, "t"); err != nil {
+	_ = s.SetPartial(ctx, "u", "req", 0, "x")
+	if err := s.ClearPartials(ctx, "u"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.Partials(ctx, "t", "req"); len(got) != 0 {
-		t.Fatalf("after clear = %v", got)
+	if _, ok, _ := s.TakePartials(ctx, "u", "req", 1); ok {
+		t.Fatal("cleared partials still there")
 	}
 }
 
