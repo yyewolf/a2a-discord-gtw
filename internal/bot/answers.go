@@ -67,6 +67,18 @@ func (g *Gateway) HandleInteraction(ctx context.Context, in Interaction) {
 	if err := in.Acknowledge(); err != nil {
 		g.log.Warn("acknowledge interaction", "err", err)
 	}
+	conv, ok, err := g.store.ConversationByContext(ctx, agent.Name, rec.ContextID)
+	if err != nil || !ok {
+		g.log.Error("conversation of a task being answered", "task", id.Task, "found", ok, "err", err)
+		g.ephemeral(in, "⚠️ I lost track of this conversation.")
+		return
+	}
+	// Everything from checking the request to sending the answer happens
+	// under the conversation's lock, so a double tap, two questions answered
+	// at once, or a typed answer racing a button send one answer, and a
+	// click queued behind a turn finds the request already gone.
+	unlock := g.conv.lock(snowflake.ID(conv.ThreadID))
+	defer unlock()
 	task, req, ok := g.pending(ctx, agent, id, in)
 	if !ok {
 		return
@@ -86,13 +98,6 @@ func (g *Gateway) HandleInteraction(ctx context.Context, in Interaction) {
 		return
 	}
 	g.markAnswered(ctx, in, summary, "")
-	conv, ok, err := g.store.ConversationByContext(ctx, agent.Name, task.ContextID)
-	if err != nil || !ok {
-		g.log.Error("conversation of an answered task", "task", task.ID, "err", err)
-		return
-	}
-	unlock := g.conv.lock(snowflake.ID(conv.ThreadID))
-	defer unlock()
 	g.turn(ctx, agent, &conv, msg)
 }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
@@ -304,5 +306,36 @@ func TestResumedTurnPostsOnlyNewText(t *testing.T) {
 		if strings.Contains(m.Content, "Checked the build.") {
 			t.Fatalf("earlier text posted again: %+v", got)
 		}
+	}
+}
+
+// A double tap sends one answer; the second tap finds it answered.
+func TestDoubleTapSendsOneAnswer(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	_, msgs := pausedOn(t, h, map[string]any{"type": "tool_approval_request", "tools": []any{
+		map[string]any{"id": "tool-1", "name": "delete_file"},
+		map[string]any{"id": "tool-2", "name": "restart_pod"},
+	}})
+	agent := h.agents["claude-assistant"]
+	var mu sync.Mutex
+	answers := 0
+	agent.onSend = func(m *a2a.Message) ([]a2a.Event, error) {
+		mu.Lock()
+		answers++
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond) // the resumed turn takes a moment
+		return reply("t1", "ctx-1", "done"), nil
+	}
+	custom := component(t, msgs[0], render.KindApproveAll, 0)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			h.gw.HandleInteraction(context.Background(), &fakeInteraction{user: ownerID, customID: custom, msg: on(msgs[0])})
+		})
+	}
+	wg.Wait()
+	if answers != 1 {
+		t.Fatalf("%d answers sent", answers)
 	}
 }
