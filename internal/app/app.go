@@ -84,7 +84,11 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
 		Handler:           health.Handler(a.checks()...),
 		ReadHeaderTimeout: 5 * time.Second,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ReadTimeout:       10 * time.Second,
+		// Readiness checks are bounded at 3s; leave room to write.
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+		BaseContext:  func(net.Listener) context.Context { return ctx },
 	}
 	var wg sync.WaitGroup
 	wg.Go(func() {
