@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -36,6 +37,7 @@ type relay struct {
 	started func()
 
 	task       *a2a.Task
+	seen       []a2a.TaskID // every task of the turn, released from streaming at the end
 	transcript kagent.Transcript
 	msgs       []snowflake.ID
 	posted     []string
@@ -127,8 +129,9 @@ func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
 		r.persisted = true
 		r.started()
 	}
-	if info.TaskID != "" && (r.task == nil || r.task.ID != info.TaskID) {
-		r.g.streaming.Store(info.TaskID, true)
+	if info.TaskID != "" && !slices.Contains(r.seen, info.TaskID) {
+		r.seen = append(r.seen, info.TaskID)
+		r.g.streaming.add(info.TaskID)
 	}
 	return nil
 }
@@ -170,8 +173,8 @@ func (r *relay) flush(final bool) {
 func (r *relay) finish(ctx context.Context, streamErr error) error {
 	r.flush(true)
 	defer func() {
-		if r.task != nil {
-			r.g.streaming.Delete(r.task.ID)
+		for _, id := range r.seen {
+			r.g.streaming.remove(id)
 		}
 	}()
 	if streamErr != nil {

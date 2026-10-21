@@ -65,7 +65,7 @@ type Gateway struct {
 	conv keyedMutex
 	// streaming holds the tasks a relay is following live; the watcher
 	// leaves them alone.
-	streaming sync.Map
+	streaming taskSet
 	// starting counts, per agent, relays whose conversation has no context
 	// yet. Until it has one, the watcher cannot tell their task from a new
 	// one, so it waits.
@@ -154,27 +154,6 @@ func parseID(s string) (snowflake.ID, error) {
 		return 0, fmt.Errorf("bot: invalid Discord ID %q", s)
 	}
 	return snowflake.ID(n), nil
-}
-
-// keyedMutex is a set of mutexes created on demand.
-type keyedMutex struct {
-	mu    sync.Mutex
-	locks map[snowflake.ID]*sync.Mutex
-}
-
-func (k *keyedMutex) lock(key snowflake.ID) func() {
-	k.mu.Lock()
-	if k.locks == nil {
-		k.locks = map[snowflake.ID]*sync.Mutex{}
-	}
-	m, ok := k.locks[key]
-	if !ok {
-		m = &sync.Mutex{}
-		k.locks[key] = m
-	}
-	k.mu.Unlock()
-	m.Lock()
-	return m.Unlock
 }
 
 // beginStart marks a relay of agent as not yet bound to a context; the

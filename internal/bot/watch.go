@@ -68,7 +68,7 @@ func (g *Gateway) pollAgent(ctx context.Context, a *Agent) error {
 	slices.SortStableFunc(tasks, func(x, y *a2a.Task) int { return x.Status.Timestamp.Compare(*y.Status.Timestamp) })
 	mark := since
 	for _, t := range tasks {
-		if _, live := g.streaming.Load(t.ID); live {
+		if g.streaming.has(t.ID) {
 			mark = later(mark, *t.Status.Timestamp)
 			continue
 		}
