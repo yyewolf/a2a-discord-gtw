@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,5 +151,20 @@ func TestRecoverFromRenderedRequests(t *testing.T) {
 		if got := render.ToolIn(a.Content, i); got != want {
 			t.Errorf("tool %d = %q, want %q", i, got, want)
 		}
+	}
+}
+
+func TestManyToolsOnlyAllButtons(t *testing.T) {
+	var tools []kagent.ToolCall
+	for i := range 6 {
+		tools = append(tools, kagent.ToolCall{ID: fmt.Sprintf("tool-%d", i), Name: "t"})
+	}
+	m := render.ApprovalMessage("a", "t", &kagent.Request{Tools: tools}, nil)
+	got := ids(t, m)
+	if len(got) != 2 || got[0].Kind != render.KindApproveAll || got[1].Kind != render.KindRejectAll {
+		t.Fatalf("components = %+v", got)
+	}
+	if !strings.Contains(m.Content, "6 calls are more than fit") {
+		t.Fatalf("content = %q", m.Content)
 	}
 }

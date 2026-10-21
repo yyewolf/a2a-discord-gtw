@@ -129,6 +129,11 @@ func ApprovalMessage(agent, taskID string, req *kagent.Request, notify []snowfla
 		}
 		b.WriteString("\n")
 	}
+	if len(req.Tools) > maxButtonRows {
+		// Five rows of components per message: one row per call fits up
+		// to four, plus the "all" row.
+		fmt.Fprintf(&b, "-# %d calls are more than fit one row each; approve or reject them all.\n", len(req.Tools))
+	}
 	m := discord.NewMessageCreate().
 		WithContent(Truncate(strings.TrimSpace(b.String()), MessageLimit)).
 		WithAllowedMentions(allowed)
