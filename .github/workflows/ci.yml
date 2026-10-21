@@ -31,3 +31,27 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
+
+  chart:
+    runs-on: ubuntu-latest
+    env:
+      CHART: charts/a2a-discord-gtw
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: "v4.3.0" # quoted: the golangci-lint regex manager in renovate.json matches unquoted versions in this file
+      - name: Lint
+        run: helm lint --strict "$CHART" -f "$CHART/ci/ci-values.yaml"
+      - name: Template
+        run: |
+          set -euo pipefail
+          values="$CHART/ci/ci-values.yaml"
+          helm template ci "$CHART" -f "$values" > /dev/null
+          helm template ci "$CHART" -f "$values" --set persistence.enabled=false > /dev/null
+          helm template ci "$CHART" -f "$values" --set networkPolicy.enabled=true,service.enabled=true > /dev/null
+          # Without a token Secret, rendering must fail.
+          if helm template ci "$CHART" -f "$values" --set discordToken.existingSecret= > /dev/null 2>&1; then
+            echo "rendering without discordToken.existingSecret should fail" >&2
+            exit 1
+          fi
