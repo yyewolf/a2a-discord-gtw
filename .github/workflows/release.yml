@@ -29,6 +29,9 @@ jobs:
       - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: "v4.3.0"
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -57,3 +60,20 @@ jobs:
           subject-name: ghcr.io/yyewolf/a2a-discord-gtw
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
+      - name: Publish Helm chart
+        id: chart
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          helm package charts/a2a-discord-gtw --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
+          helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GITHUB_TOKEN"
+          helm push "$RUNNER_TEMP/chart/a2a-discord-gtw-$version.tgz" oci://ghcr.io/yyewolf/charts 2>&1 | tee "$RUNNER_TEMP/chart/push.log"
+          digest=$(awk '/^Digest:/ {print $2}' "$RUNNER_TEMP/chart/push.log")
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign Helm chart
+        run: cosign sign --yes "ghcr.io/yyewolf/charts/a2a-discord-gtw@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.chart.outputs.digest }}
