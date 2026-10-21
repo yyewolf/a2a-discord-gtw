@@ -40,7 +40,7 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 	e.cfg.BindFlags(root.PersistentFlags())
-	root.AddCommand(newVersionCmd())
+	root.AddCommand(newVersionCmd(), newServeCmd(e))
 	return root
 }
 
@@ -52,5 +52,3 @@ func Execute(ctx context.Context) int {
 	}
 	return 0
 }
-
-var _ = (*env)(nil) // used by the subcommands that follow

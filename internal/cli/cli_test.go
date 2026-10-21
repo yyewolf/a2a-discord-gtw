@@ -27,3 +27,12 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+func TestServeNeedsToken(t *testing.T) {
+	t.Setenv("ADG_DISCORD_TOKEN", "")
+	t.Setenv("ADG_DISCORD_TOKEN_FILE", "")
+	_, err := run(t, "serve", "--data-dir", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "ADG_DISCORD_TOKEN") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
