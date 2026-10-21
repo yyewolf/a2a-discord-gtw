@@ -72,9 +72,9 @@ func (g *Gateway) HandleAsk(ctx context.Context, a Ask, respond func(text string
 		say(err.Error())
 		return
 	}
-	channel, ok := g.channelOf(agent.Name)
-	if !ok {
-		say(fmt.Sprintf("**%s** has no channel yet.", agent.Name))
+	channel, err := g.agentChannel(ctx, agent.Name)
+	if err != nil {
+		say(fmt.Sprintf("⚠️ **%s** has no channel: %v", agent.Name, err))
 		return
 	}
 	conv, err := g.openConversation(ctx, agent, channel, render.Title(a.Prompt), mention(a.UserID), "")

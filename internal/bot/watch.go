@@ -39,6 +39,7 @@ func (g *Gateway) Watch(ctx context.Context) {
 // last poll (on the very first poll it only records where to start, so
 // history is not replayed), then follows up every agent's unsettled tasks.
 func (g *Gateway) Poll(ctx context.Context) {
+	g.retryChannels(ctx)
 	g.followUp(ctx)
 	for _, name := range g.order {
 		a := g.agents[name]
@@ -184,9 +185,9 @@ func (g *Gateway) conversationFor(ctx context.Context, a *Agent, t *a2a.Task) (*
 		// Possibly the task of a conversation being started right now.
 		return nil, errDeferred
 	}
-	channel, ok := g.channelOf(a.Name)
-	if !ok {
-		return nil, fmt.Errorf("%s has no channel", a.Name)
+	channel, err := g.agentChannel(ctx, a.Name)
+	if err != nil {
+		return nil, err
 	}
 	return g.openConversation(ctx, a, channel, taskTitle(t), originKagent, t.ContextID)
 }

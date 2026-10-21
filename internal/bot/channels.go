@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
@@ -49,10 +50,58 @@ func (g *Gateway) ensureAgent(ctx context.Context, a *Agent, existing *[]discord
 	if err == nil {
 		g.byChannel[id] = a.Name
 		delete(g.channelErr, a.Name)
+		delete(g.channelRetry, a.Name)
 		return nil
 	}
 	g.channelErr[a.Name] = err
+	wait := min(max(2*g.channelRetry[a.Name].wait, firstChannelRetry), maxChannelRetry)
+	g.channelRetry[a.Name] = channelRetry{next: time.Now().Add(wait), wait: wait}
 	return err
+}
+
+const (
+	firstChannelRetry = 30 * time.Second
+	maxChannelRetry   = 10 * time.Minute
+)
+
+// channelRetry is when an agent's missing channel is tried again.
+type channelRetry struct {
+	next time.Time
+	wait time.Duration
+}
+
+// retryChannels tries again the missing channels whose backoff has passed.
+func (g *Gateway) retryChannels(ctx context.Context) {
+	var existing []discord.GuildChannel
+	listed := false
+	for _, name := range g.order {
+		g.mu.RLock()
+		r, missing := g.channelRetry[name]
+		g.mu.RUnlock()
+		if !missing || time.Now().Before(r.next) {
+			continue
+		}
+		if err := g.ensureAgent(ctx, g.agents[name], &existing, &listed); err != nil {
+			g.log.Warn("agent channel still missing", "agent", name, "err", err)
+		} else {
+			g.log.Info("agent channel provisioned", "agent", name)
+		}
+	}
+}
+
+// agentChannel is an agent's channel, provisioned on the spot if it is
+// missing, whatever the backoff: someone is waiting for it.
+func (g *Gateway) agentChannel(ctx context.Context, agent string) (snowflake.ID, error) {
+	if ch, ok := g.channelOf(agent); ok {
+		return ch, nil
+	}
+	var existing []discord.GuildChannel
+	listed := false
+	if err := g.ensureAgent(ctx, g.agents[agent], &existing, &listed); err != nil {
+		return 0, err
+	}
+	ch, _ := g.channelOf(agent)
+	return ch, nil
 }
 
 // ChannelsReady fails while an agent has no channel, saying why.

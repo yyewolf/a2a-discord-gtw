@@ -5,6 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+
+	"github.com/yyewolf/a2a-discord-gtw/internal/bot"
 )
 
 func TestEnsureChannelsCreatesWithTopic(t *testing.T) {
@@ -93,5 +97,40 @@ func TestEnsureChannelsKeepsGoing(t *testing.T) {
 	}
 	if err := h.gw.ChannelsReady(context.Background()); err == nil || !strings.Contains(err.Error(), "claude-assistant") {
 		t.Fatalf("ready = %v", err)
+	}
+}
+
+// A missing channel is not retried on every poll, but at once when someone
+// needs it.
+func TestMissingChannelRetriedOnDemand(t *testing.T) {
+	h := newHarness(t)
+	attempts := 0
+	h.discord.failChannel = func(name string) error {
+		if name != "claude-assistant" {
+			return nil
+		}
+		attempts++
+		if attempts == 1 {
+			return missingPermissions()
+		}
+		return nil
+	}
+	_ = h.gw.EnsureChannels(context.Background())
+	h.gw.Poll(context.Background())
+	h.gw.Poll(context.Background())
+	if attempts != 1 {
+		t.Fatalf("%d attempts within the backoff", attempts)
+	}
+	h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) { return reply("t1", "ctx-1", "ok"), nil }
+	var replies []string
+	h.gw.HandleAsk(context.Background(), bot.Ask{UserID: ownerID, Agent: "claude-assistant", Prompt: "hi"}, func(s string) error {
+		replies = append(replies, s)
+		return nil
+	})
+	if len(replies) != 1 || !strings.Contains(replies[0], "Started in") || attempts != 2 {
+		t.Fatalf("replies = %q, attempts = %d", replies, attempts)
+	}
+	if err := h.gw.ChannelsReady(context.Background()); err != nil {
+		t.Fatalf("still not ready: %v", err)
 	}
 }
