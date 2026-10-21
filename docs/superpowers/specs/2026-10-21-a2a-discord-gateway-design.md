@@ -98,9 +98,15 @@ Every configured agent has its own text channel inside `category_id`, named
 after the agent (`windmill-maintainer`). The bot creates it when missing, with
 the agent's description from its agent card as the channel topic. The
 agent → channel ID mapping is persisted, so a channel renamed by hand is reused
-rather than duplicated; if the stored channel was deleted, it is recreated.
-Channels outside the category are ignored. The bot needs Manage Channels on the
-category.
+rather than duplicated; if the stored channel was deleted or moved out of the
+category, it is replaced — at startup, on Discord's channel update and delete
+events, and when a post finds it gone. Channels outside the category are
+ignored. The bot needs Manage Channels on the category.
+
+One agent's channel failing (typically Discord 50013, Missing Permissions)
+does not stop the process: the error names the missing permission, the agent
+is retried with backoff (30 s doubling to 10 min) and immediately whenever
+something needs its channel, and `/readyz` reports it meanwhile.
 
 ### Threads
 
@@ -130,10 +136,22 @@ it (see Questions) instead of being sent as a new turn — kagent rejects new
 turns on a context with a pending question
 (`native session is waiting for another task`).
 
+A conversation is stored as soon as its thread exists, with no context until
+kagent names one: kagent rejects a client-chosen `contextId` (verified live:
+`-32001 task not found`), so the first turn's events bind it. A thread whose
+first turn failed before that still works; the next reply starts afresh.
+Binding a context and the watcher opening a conversation for an unknown
+context are serialised per agent, so the two never claim the same context.
+
 Responses stream (`SendStreamingMessage`): the bot posts one message and edits
-it as text arrives, throttled to Discord's rate limits, splitting at 2000
+it as text arrives, throttled to Discord's rate limits (with a trailing edit,
+so text held back shows even if the agent goes quiet), splitting at 2000
 characters on paragraph or code-fence boundaries. The typing indicator runs
 while the task is working.
+
+Each task is recorded the moment it appears, with how much of its reply has
+been posted. A stream that is cut, or silent for 5 minutes, is let go; the
+task stays unsettled and the follow-up (below) finishes the job.
 
 ### Tasks the bot did not start (watch)
 
@@ -144,7 +162,17 @@ channel, then is treated like any other. State changes post into the thread: the
 completes, the error when it fails, the question when it needs input.
 
 The watermark is persisted. On first start it is "now", so history is not
-replayed.
+replayed. The list is sorted by status timestamp before use (the A2A spec does
+not fix an order; kagent 1.0.0-alpha17 happened to return oldest first), and a
+task that fails to surface leaves the watermark just before it, so it and
+everything after it are retried. A conversation busy with a turn is not waited
+for: its task is deferred to the next poll and read again under the lock.
+
+**Follow-up.** Every poll also re-reads every recorded task of every agent,
+watched or not, that has not settled, and shows what changed: the rest of its
+reply, its state, a new question. That is how cut streams, idle streams and
+restarts are recovered, and how a question answered in kagent's UI has its
+buttons removed here.
 
 ### Questions
 
@@ -179,17 +207,46 @@ Rendering:
 - tool approval: Approve / Reject per tool (Reject opens a modal for an
   optional reason), and "Approve all" when there are several.
 - The question message pings `notify_user_ids`. After answering, its buttons
-  are disabled and it shows what was chosen and by whom.
+  are disabled and it shows what was chosen and by whom. However a request
+  ends — buttons, typed reply, kagent's UI — its messages lose their buttons.
+- A typed reply that cannot answer (an approval, several questions) posts the
+  request's buttons again.
+- "Other…" and "Reject…" open their modal immediately, labelled from the
+  message itself: Discord allows three seconds and kagent is not asked first.
+  The answer is checked when the modal is submitted.
+- Answering is serialised per conversation: the request is re-read, the
+  answer recorded and, once complete, taken atomically and sent, all under
+  the conversation's lock. A double tap sends once; a click queued behind a
+  turn finds the request already gone.
+- Stale buttons are detected with a 72-bit digest of the request key carried
+  in the custom ID (tool IDs share long prefixes, so a prefix is not enough).
 
 Only `allowed_user_ids` may press buttons or send messages that reach an agent;
 others get an ephemeral refusal for interactions and are ignored otherwise.
 
 ### Health and operation
 
-`/healthz` (process up) and `/readyz` (Discord gateway connected, kagent
-reachable) on `ADG_LISTEN` (default `:8080`). Structured logs (`log/slog`).
-Graceful shutdown on SIGTERM. Image `FROM scratch`, UID 65532, writes only to
-the data directory.
+`/healthz` (process up) and `/readyz` (Discord gateway connected, database
+usable, every agent reachable, every agent channel present) on `ADG_LISTEN`
+(default `:8080`). Structured logs (`log/slog`); DisGo's own logs are kept at
+info and above, since its debug logs carry the bot token. Image `FROM
+scratch`, UID 65532, writes only to the data directory. Settled task records
+are pruned after 30 days.
+
+Shutdown on SIGTERM: the handlers' context is cancelled (every Discord and
+kagent call carries it), the bot waits up to ten seconds for them, then closes
+the DisGo client — in that order, because DisGo's closed rate limiter would
+block a late REST call forever. A second signal exits at once.
+
+### Limits inherent to Discord
+
+- A select menu holds 25 options: questions with more choices show the first
+  25 and say so; "Other…" accepts anything.
+- A message holds five component rows: tool approvals with up to four calls
+  get a row each; with more, only Approve all / Reject all, and the message
+  says why.
+- 2000 characters per message (replies are split), 100 per thread name,
+  1024 per channel topic, three seconds to answer an interaction.
 
 ## Testing
 
