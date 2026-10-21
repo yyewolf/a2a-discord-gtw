@@ -328,3 +328,36 @@ func TestTaskRecordedBeforeTheStreamEnds(t *testing.T) {
 		t.Fatalf("record = %+v, %v, %v", rec, ok, err)
 	}
 }
+
+// A turn whose stream is cut is followed up: the rest of the reply and the
+// final state reach the thread, for agents that are not watched too.
+func TestCutTurnIsFollowedUp(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	agent := h.agents["claude-assistant"]
+	agent.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		return reply("t1", "ctx-1", "Hello")[:3], errors.New("connection reset")
+	}
+	thread := h.say(h.channel("claude-assistant"), ownerID, "hi")
+
+	// kagent finished the task meanwhile.
+	agent.put(&a2a.Task{
+		ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		Artifacts: []*a2a.Artifact{{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("Hello, world.")}}},
+	})
+	h.gw.Poll(context.Background())
+	h.gw.Poll(context.Background())
+
+	var texts []string
+	for _, m := range h.discord.in(thread) {
+		if !strings.Contains(m.Content, "Lost the connection") {
+			texts = append(texts, m.Content)
+		}
+	}
+	if strings.Join(texts, "|") != "Hello|, world." {
+		t.Fatalf("thread = %q", texts)
+	}
+	if got := h.discord.message(thread).Reactions; len(got) != 1 || got[0] != "✅" {
+		t.Fatalf("reactions = %v", got)
+	}
+}

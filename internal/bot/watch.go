@@ -36,9 +36,10 @@ func (g *Gateway) Watch(ctx context.Context) {
 }
 
 // Poll surfaces, once, what changed in each watched agent's tasks since the
-// last poll. On the very first poll it only records where to start, so
-// history is not replayed.
+// last poll (on the very first poll it only records where to start, so
+// history is not replayed), then follows up every agent's unsettled tasks.
 func (g *Gateway) Poll(ctx context.Context) {
+	g.followUp(ctx)
 	for _, name := range g.order {
 		a := g.agents[name]
 		if !a.Watch {
@@ -88,6 +89,35 @@ func (g *Gateway) pollAgent(ctx context.Context, a *Agent) error {
 		mark = later(mark, *t.Status.Timestamp)
 	}
 	return g.store.SetWatermark(ctx, a.Name, mark)
+}
+
+// followUp re-reads every recorded task that has not settled and shows what
+// changed. It is how a turn whose stream was cut (kagent restarting, an
+// idle connection dropped, this process restarting) still reaches its
+// thread: its reply, its final state, its questions.
+func (g *Gateway) followUp(ctx context.Context) {
+	recs, err := g.store.UnsettledTasks(ctx)
+	if err != nil {
+		g.log.Warn("list unsettled tasks", "err", err)
+		return
+	}
+	for _, rec := range recs {
+		if ctx.Err() != nil {
+			return
+		}
+		a, ok := g.agents[rec.Agent]
+		if !ok || g.streaming.has(a2a.TaskID(rec.TaskID)) {
+			continue
+		}
+		t, err := a.Client.Task(ctx, a2a.TaskID(rec.TaskID))
+		if err != nil {
+			g.log.Warn("follow up task", "agent", rec.Agent, "task", rec.TaskID, "err", err)
+			continue
+		}
+		if err := g.surface(ctx, a, t); err != nil && !errors.Is(err, errDeferred) {
+			g.log.Warn("follow up task", "agent", rec.Agent, "task", rec.TaskID, "err", err)
+		}
+	}
 }
 
 // surface shows a task's changes since it was last shown: new reply text,
