@@ -21,7 +21,13 @@ type Store struct {
 
 // migrations are applied in order; the schema version is their count. Never
 // edit one that has shipped, append a new one.
-var migrations []string
+var migrations = []string{
+	// 1: the Discord channel of each agent.
+	`CREATE TABLE agent_channels (
+		agent      TEXT PRIMARY KEY,
+		channel_id INTEGER NOT NULL
+	)`,
+}
 
 // Open opens (creating if needed) the database at path and migrates it.
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -85,9 +91,4 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func register(sql string) struct{} {
-	migrations = append(migrations, sql)
-	return struct{}{}
 }
