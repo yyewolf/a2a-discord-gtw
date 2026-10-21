@@ -161,3 +161,12 @@ func TestPendingTask(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestCardSizeIsBounded(t *testing.T) {
+	srv := kagenttest.New()
+	defer srv.Close()
+	srv.Card.Description = strings.Repeat("x", 2<<20)
+	if _, err := newAgent(t, srv).Card(context.Background()); err == nil {
+		t.Fatal("a 2 MiB agent card was accepted")
+	}
+}

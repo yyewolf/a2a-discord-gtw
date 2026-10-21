@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"strings"
@@ -68,6 +69,9 @@ func (a *Agent) ctx(ctx context.Context) context.Context {
 	return a2aclient.AttachServiceParams(ctx, params)
 }
 
+// maxCardBytes bounds the agent card read; real cards are a few kilobytes.
+const maxCardBytes = 1 << 20
+
 // Card fetches the agent card, for its description.
 func (a *Agent) Card(ctx context.Context) (*a2a.AgentCard, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.url, "/")+"/.well-known/agent-card.json", nil)
@@ -83,7 +87,7 @@ func (a *Agent) Card(ctx context.Context) (*a2a.AgentCard, error) {
 		return nil, fmt.Errorf("kagent: agent card: status %d", res.StatusCode)
 	}
 	var card a2a.AgentCard
-	if err := json.NewDecoder(res.Body).Decode(&card); err != nil {
+	if err := json.NewDecoder(io.LimitReader(res.Body, maxCardBytes)).Decode(&card); err != nil {
 		return nil, fmt.Errorf("kagent: agent card: %w", err)
 	}
 	return &card, nil
