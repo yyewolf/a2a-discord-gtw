@@ -144,8 +144,13 @@ func (a *App) checks() []health.Check {
 		{Name: "channels", Fn: a.gateway.ChannelsReady},
 		{Name: "store", Fn: a.store.Ping},
 		{Name: "kagent", Fn: func(ctx context.Context) error {
-			_, err := a.agents[0].Card(ctx)
-			return err
+			var errs []error
+			for i, c := range a.agents {
+				if _, err := c.Card(ctx); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", a.file.Agents[i].Name, err))
+				}
+			}
+			return errors.Join(errs...)
 		}},
 	}
 }
