@@ -3,8 +3,11 @@ package bot_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
@@ -388,4 +391,52 @@ func TestFailedQuestionPostIsRetried(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0].Content, "Red or blue?") {
 		t.Fatalf("thread = %+v", got)
 	}
+}
+
+// Text held back by the edit throttle shows up when the agent goes quiet,
+// not only with its next event.
+func TestThrottledTextShowsWhileTheAgentIsQuiet(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	finish := make(chan struct{})
+	h.agents["claude-assistant"].onStream = func(ctx context.Context, _ *a2a.Message) iter.Seq2[a2a.Event, error] {
+		return func(yield func(a2a.Event, error) bool) {
+			art := func(text string, appendTo bool) *a2a.TaskArtifactUpdateEvent {
+				e := textArtifact("a", text)
+				e.TaskID, e.ContextID, e.Append = "t1", "ctx-1", appendTo
+				return e
+			}
+			if !yield(&a2a.Task{ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateWorking}}, nil) ||
+				!yield(art("Running the", false), nil) || !yield(art(" tests…", true), nil) {
+				return
+			}
+			select { // a long tool call
+			case <-finish:
+			case <-ctx.Done():
+				return
+			}
+			yield(&a2a.Task{
+				ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+				Artifacts: []*a2a.Artifact{{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("Running the tests…")}}},
+			}, nil)
+		}
+	}
+	ch := h.channel("claude-assistant")
+	id := h.discord.userMessage(ch, "test")
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		h.gw.HandleMessage(context.Background(), bot.Message{ID: id, ChannelID: ch, GuildID: guildID, AuthorID: ownerID, Content: "test"})
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := h.discord.in(id); len(got) == 1 && got[0].Content == "Running the tests…" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("held-back text not shown: %+v", h.discord.in(id))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	close(finish)
+	wg.Wait()
 }

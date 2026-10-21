@@ -83,7 +83,7 @@ func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message)
 	}
 	unlock := g.conv.lock(m.ChannelID)
 	defer unlock()
-	err := g.run(ctx, agent, &conv, agent.Client.Stream(ctx, kagent.TextMessage(conv.ContextID, m.Content)))
+	err := g.run(ctx, agent, &conv, kagent.TextMessage(conv.ContextID, m.Content))
 	if errors.Is(err, errWaiting) {
 		g.answerTyped(ctx, agent, &conv, m)
 		return
@@ -95,7 +95,7 @@ func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message)
 
 // turn sends a message and relays the reply.
 func (g *Gateway) turn(ctx context.Context, agent *Agent, conv *store.Conversation, msg *a2a.Message) {
-	if err := g.run(ctx, agent, conv, agent.Client.Stream(ctx, msg)); err != nil {
+	if err := g.run(ctx, agent, conv, msg); err != nil {
 		g.log.Warn("turn ended with an error", "agent", agent.Name, "thread", conv.ThreadID, "err", err)
 	}
 }

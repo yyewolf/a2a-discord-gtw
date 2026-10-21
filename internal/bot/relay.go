@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -54,7 +54,7 @@ var errWaiting = errors.New("bot: conversation is waiting for an answer")
 
 // run consumes the event stream of one turn of a stored conversation. A
 // conversation without a context yet is bound to the one the stream reveals.
-func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, events iter.Seq2[a2a.Event, error]) error {
+func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, msg *a2a.Message) error {
 	r := &relay{g: g, agent: agent, conv: conv, started: func() {}}
 	if conv.ContextID == "" {
 		r.started = g.beginStart(agent.Name)
@@ -66,7 +66,7 @@ func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversatio
 		defer close(typing)
 		r.typing(typingCtx)
 	}()
-	err := r.consume(ctx, events)
+	err := r.consume(ctx, msg)
 	stopTyping()
 	<-typing
 	if errors.Is(err, errWaiting) {
@@ -89,36 +89,97 @@ func (r *relay) typing(ctx context.Context) {
 	}
 }
 
-func (r *relay) consume(ctx context.Context, events iter.Seq2[a2a.Event, error]) error {
+// streamItem is one element of an event stream.
+type streamItem struct {
+	ev  a2a.Event
+	err error
+}
+
+// consume sends msg and follows the stream. The stream is read by its own
+// goroutine, so the relay can also wake on a timer: to show text that a
+// throttled edit held back while the agent goes quiet.
+func (r *relay) consume(ctx context.Context, msg *a2a.Message) error {
+	sctx, cancel := context.WithCancel(ctx)
+	items := make(chan streamItem)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(items)
+		for ev, err := range r.agent.Client.Stream(sctx, msg) {
+			select {
+			case items <- streamItem{ev, err}:
+			case <-sctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	flushTimer := time.NewTimer(time.Hour)
+	flushTimer.Stop()
+	defer flushTimer.Stop()
 	first := true
-	for ev, err := range events {
-		if err != nil {
-			if first && kagent.IsWaitingForInput(err) {
-				return errWaiting
-			}
-			return err
-		}
-		first = false
-		if err := r.observe(ctx, ev); err != nil {
-			return err
-		}
-		switch e := ev.(type) {
-		case *a2a.Task:
-			r.task = e
-		case *a2a.TaskStatusUpdateEvent:
-			if r.task == nil {
-				r.task = &a2a.Task{ID: e.TaskID, ContextID: e.ContextID}
-			}
-			r.task.Status = e.Status
-		case *a2a.TaskArtifactUpdateEvent:
-			r.transcript.Add(e)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-flushTimer.C:
 			r.flush(ctx, false)
-		}
-		if r.task != nil {
-			r.g.showState(ctx, r.conv, r.task.Status.State)
+		case it, ok := <-items:
+			if !ok {
+				return nil
+			}
+			if it.err != nil {
+				if first && kagent.IsWaitingForInput(it.err) {
+					return errWaiting
+				}
+				return it.err
+			}
+			first = false
+			if err := r.handle(ctx, it.ev); err != nil {
+				return err
+			}
+			if r.dirty() {
+				// Trailing edge: show the held-back text once the edit
+				// interval has passed, even if no other event comes.
+				flushTimer.Reset(max(time.Until(r.lastEdit.Add(editInterval)), 0))
+			}
 		}
 	}
+}
+
+// handle applies one event of the stream.
+func (r *relay) handle(ctx context.Context, ev a2a.Event) error {
+	if err := r.observe(ctx, ev); err != nil {
+		return err
+	}
+	switch e := ev.(type) {
+	case *a2a.Task:
+		r.task = e
+	case *a2a.TaskStatusUpdateEvent:
+		if r.task == nil {
+			r.task = &a2a.Task{ID: e.TaskID, ContextID: e.ContextID}
+		}
+		r.task.Status = e.Status
+	case *a2a.TaskArtifactUpdateEvent:
+		r.transcript.Add(e)
+		r.flush(ctx, false)
+	}
+	if r.task != nil {
+		r.g.showState(ctx, r.conv, r.task.Status.State)
+	}
 	return nil
+}
+
+// dirty reports text not shown yet.
+func (r *relay) dirty() bool {
+	return strings.Join(r.posted, "\n") != strings.Join(render.Chunk(r.transcript.Text(), render.MessageLimit), "\n")
 }
 
 // observe binds the conversation to its context and marks the task as

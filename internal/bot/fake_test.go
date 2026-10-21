@@ -324,6 +324,9 @@ type fakeAgent struct {
 	pendingErr error
 	// taskErr makes the next Task call for an ID fail once.
 	taskErr map[a2a.TaskID]error
+	// onStream, when set, replaces onSend with a hand-written stream, for
+	// tests that need timing.
+	onStream func(ctx context.Context, m *a2a.Message) iter.Seq2[a2a.Event, error]
 }
 
 func newFakeAgent(description string) *fakeAgent {
@@ -339,7 +342,13 @@ func (a *fakeAgent) Card(context.Context) (*a2a.AgentCard, error) {
 
 // Stream is lazy like the real client: the message is sent when the stream
 // is first read.
-func (a *fakeAgent) Stream(_ context.Context, m *a2a.Message) iter.Seq2[a2a.Event, error] {
+func (a *fakeAgent) Stream(ctx context.Context, m *a2a.Message) iter.Seq2[a2a.Event, error] {
+	a.mu.Lock()
+	custom := a.onStream
+	a.mu.Unlock()
+	if custom != nil {
+		return custom(ctx, m)
+	}
 	return func(yield func(a2a.Event, error) bool) {
 		a.mu.Lock()
 		a.sent = append(a.sent, m)
