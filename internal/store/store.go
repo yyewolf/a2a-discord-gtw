@@ -54,6 +54,15 @@ var migrations = []string{
 		agent TEXT PRIMARY KEY,
 		at    TIMESTAMP NOT NULL
 	)`,
+	// 5: answers collected so far for a request with several questions or
+	// several tools; kagent wants them all in one message.
+	`CREATE TABLE partial_answers (
+		task_id     TEXT    NOT NULL,
+		request_key TEXT    NOT NULL,
+		idx         INTEGER NOT NULL,
+		value       TEXT    NOT NULL,
+		PRIMARY KEY (task_id, request_key, idx)
+	)`,
 }
 
 // Open opens (creating if needed) the database at path and migrates it.
