@@ -323,20 +323,45 @@ func (g *Gateway) settle(ctx context.Context, agent *Agent, conv *store.Conversa
 	}
 	rec.TaskID, rec.Agent, rec.ContextID = string(t.ID), agent.Name, t.ContextID
 	rec.State, rec.PostedLen = string(t.Status.State), postedLen
-	if req, err := kagent.PendingRequest(t); err == nil {
-		if rec.RequestKey != req.Key() {
-			// Recorded as asked only once posted: a failure is retried by
-			// the next follow-up.
-			if err := g.ask(ctx, agent, conv, t, req); err != nil {
-				g.log.Error("post request", "thread", conv.ThreadID, "task", t.ID, "err", err)
-			} else {
-				rec.RequestKey = req.Key()
-			}
+	req, perr := kagent.PendingRequest(t)
+	pending := ""
+	if perr == nil {
+		pending = req.Key()
+	}
+	if rec.RequestKey != "" && rec.RequestKey != pending {
+		// The request shown was answered, here or anywhere else (a typed
+		// reply, the kagent UI), or replaced: its buttons go.
+		g.closeRequest(ctx, rec.TaskID)
+		rec.RequestKey = ""
+	}
+	switch {
+	case perr == nil && rec.RequestKey != pending:
+		// Recorded as asked only once posted: a failure is retried by the
+		// next follow-up.
+		if err := g.ask(ctx, agent, conv, t, req); err != nil {
+			g.log.Error("post request", "thread", conv.ThreadID, "task", t.ID, "err", err)
+		} else {
+			rec.RequestKey = pending
 		}
-	} else if !errors.Is(err, kagent.ErrNoRequest) {
-		g.post(ctx, snowflake.ID(conv.ThreadID), fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, err))
+	case perr != nil && !errors.Is(perr, kagent.ErrNoRequest):
+		g.post(ctx, snowflake.ID(conv.ThreadID), fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, perr))
 	}
 	return g.store.PutTask(ctx, rec)
+}
+
+// closeRequest removes the buttons from the messages of a task's request.
+func (g *Gateway) closeRequest(ctx context.Context, taskID string) {
+	msgs, err := g.store.TakeRequestMessages(ctx, taskID)
+	if err != nil {
+		g.log.Warn("request messages", "task", taskID, "err", err)
+		return
+	}
+	for _, m := range msgs {
+		upd := discord.NewMessageUpdate().ClearComponents()
+		if _, err := g.discord.UpdateMessage(snowflake.ID(m.ChannelID), snowflake.ID(m.MessageID), upd, rest.WithCtx(ctx)); err != nil {
+			g.log.Warn("disable request buttons", "message", m.MessageID, "err", err)
+		}
+	}
 }
 
 // ask posts a pending request in the conversation's thread.
@@ -349,8 +374,12 @@ func (g *Gateway) ask(ctx context.Context, agent *Agent, conv *store.Conversatio
 		msgs = render.QuestionMessages(agent.Name, string(t.ID), req, g.notify)
 	}
 	for _, m := range msgs {
-		if _, err := g.discord.CreateMessage(thread, m, rest.WithCtx(ctx)); err != nil {
+		posted, err := g.discord.CreateMessage(thread, m, rest.WithCtx(ctx))
+		if err != nil {
 			return fmt.Errorf("post request: %w", err)
+		}
+		if err := g.store.AddRequestMessage(ctx, string(t.ID), store.RequestMessage{ChannelID: uint64(thread), MessageID: uint64(posted.ID)}); err != nil {
+			g.log.Warn("record request message", "task", t.ID, "err", err)
 		}
 	}
 	return nil

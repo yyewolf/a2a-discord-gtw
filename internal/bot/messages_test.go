@@ -227,6 +227,10 @@ func TestQuestionIsAskedAndTypedAnswerSent(t *testing.T) {
 	if got := h.discord.in(msgID); got[len(got)-1].Content != "YOU PICKED Blue." {
 		t.Fatalf("thread = %+v", got)
 	}
+	// The question answered by text has no buttons left.
+	if q := h.discord.message(thread[0].ID); len(q.Components) != 0 {
+		t.Fatalf("question still has %d component rows", len(q.Components))
+	}
 	if got := h.discord.message(msgID).Reactions; len(got) != 1 || got[0] != "✅" {
 		t.Fatalf("reactions = %v", got)
 	}

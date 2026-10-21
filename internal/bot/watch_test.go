@@ -90,6 +90,10 @@ func TestWatchSurfacesScheduledRun(t *testing.T) {
 	if len(got) != 3 || got[2].Content != "Tagged v1.845.0-fork.1." {
 		t.Fatalf("thread = %+v", got)
 	}
+	// Answered elsewhere, the question here loses its buttons.
+	if q := h.discord.message(got[1].ID); len(q.Components) != 0 {
+		t.Fatalf("question still has %d component rows", len(q.Components))
+	}
 	if s := h.discord.message(status[0].ID).Content; !strings.HasPrefix(s, "✅ **windmill-maintainer** · done") {
 		t.Fatalf("status = %q", s)
 	}
