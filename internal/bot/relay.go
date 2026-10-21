@@ -248,8 +248,13 @@ func (g *Gateway) settle(ctx context.Context, agent *Agent, conv *store.Conversa
 	rec.State, rec.PostedLen = string(t.Status.State), postedLen
 	if req, err := kagent.PendingRequest(t); err == nil {
 		if rec.RequestKey != req.Key() {
-			g.ask(ctx, agent, conv, t, req)
-			rec.RequestKey = req.Key()
+			// Recorded as asked only once posted: a failure is retried by
+			// the next follow-up.
+			if err := g.ask(ctx, agent, conv, t, req); err != nil {
+				g.log.Error("post request", "thread", conv.ThreadID, "task", t.ID, "err", err)
+			} else {
+				rec.RequestKey = req.Key()
+			}
 		}
 	} else if !errors.Is(err, kagent.ErrNoRequest) {
 		g.post(ctx, snowflake.ID(conv.ThreadID), fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, err))
@@ -258,7 +263,7 @@ func (g *Gateway) settle(ctx context.Context, agent *Agent, conv *store.Conversa
 }
 
 // ask posts a pending request in the conversation's thread.
-func (g *Gateway) ask(ctx context.Context, agent *Agent, conv *store.Conversation, t *a2a.Task, req *kagent.Request) {
+func (g *Gateway) ask(ctx context.Context, agent *Agent, conv *store.Conversation, t *a2a.Task, req *kagent.Request) error {
 	thread := snowflake.ID(conv.ThreadID)
 	var msgs []discord.MessageCreate
 	if req.IsApproval() {
@@ -268,9 +273,10 @@ func (g *Gateway) ask(ctx context.Context, agent *Agent, conv *store.Conversatio
 	}
 	for _, m := range msgs {
 		if _, err := g.discord.CreateMessage(thread, m, rest.WithCtx(ctx)); err != nil {
-			g.log.Error("post question", "thread", thread, "task", t.ID, "err", err)
+			return fmt.Errorf("post request: %w", err)
 		}
 	}
+	return nil
 }
 
 // post sends a plain notice; failures are logged.

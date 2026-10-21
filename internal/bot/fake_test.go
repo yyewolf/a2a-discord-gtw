@@ -51,6 +51,8 @@ type fakeDiscord struct {
 	order    []snowflake.ID
 	threads  map[snowflake.ID]snowflake.ID // thread -> parent channel
 	typing   int
+	// failCreate, when set, can fail a message creation.
+	failCreate func(m discord.MessageCreate) error
 	// created logs the content of every message ever created, including
 	// ones deleted since.
 	created []string
@@ -156,6 +158,11 @@ func (f *fakeDiscord) CreateMessage(ch snowflake.ID, m discord.MessageCreate, op
 	if _, ok := f.channels[ch]; !ok {
 		if _, ok := f.threads[ch]; !ok {
 			return nil, unknownChannel()
+		}
+	}
+	if f.failCreate != nil {
+		if err := f.failCreate(m); err != nil {
+			return nil, err
 		}
 	}
 	msg := &fakeMessage{ID: f.id(), ChannelID: ch, Content: m.Content, Components: m.Components, Mentions: m.AllowedMentions}

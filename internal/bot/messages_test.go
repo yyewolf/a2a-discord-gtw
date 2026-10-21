@@ -361,3 +361,31 @@ func TestCutTurnIsFollowedUp(t *testing.T) {
 		t.Fatalf("reactions = %v", got)
 	}
 }
+
+// A question that could not be posted is posted by the next follow-up.
+func TestFailedQuestionPostIsRetried(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		return question("t1", "ctx-1", kagent.Question{Question: "Red or blue?", Choices: []string{"Red", "Blue"}}), nil
+	}
+	h.discord.failCreate = func(m discord.MessageCreate) error {
+		if len(m.Components) > 0 {
+			return errors.New("503 Service Unavailable")
+		}
+		return nil
+	}
+	thread := h.say(h.channel("claude-assistant"), ownerID, "ask me")
+	if n := len(h.discord.in(thread)); n != 0 {
+		t.Fatalf("%d messages after a failed post", n)
+	}
+	h.discord.mu.Lock()
+	h.discord.failCreate = nil
+	h.discord.mu.Unlock()
+	h.gw.Poll(context.Background())
+	h.gw.Poll(context.Background())
+	got := h.discord.in(thread)
+	if len(got) != 1 || !strings.Contains(got[0].Content, "Red or blue?") {
+		t.Fatalf("thread = %+v", got)
+	}
+}
