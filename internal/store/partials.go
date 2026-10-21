@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 )
@@ -52,4 +53,49 @@ func (s *Store) ClearPartials(ctx context.Context, taskID string) error {
 		return fmt.Errorf("store: clear partial answers: %w", err)
 	}
 	return nil
+}
+
+// TakePartials returns the answers recorded for a request and forgets every
+// partial answer of the task, in one transaction, but only once all n parts
+// are there; otherwise it leaves them and reports false. Two concurrent
+// takers cannot both get the full set.
+func (s *Store) TakePartials(ctx context.Context, taskID, requestKey string, n int) (map[int]json.RawMessage, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("store: take partial answers: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // a no-op after Commit
+	out, err := scanPartials(ctx, tx, taskID, requestKey)
+	if err != nil {
+		return nil, false, fmt.Errorf("store: take partial answers: %w", err)
+	}
+	if len(out) < n {
+		return nil, false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM partial_answers WHERE task_id = ?`, taskID); err != nil {
+		return nil, false, fmt.Errorf("store: take partial answers: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("store: take partial answers: %w", err)
+	}
+	return out, true, nil
+}
+
+func scanPartials(ctx context.Context, tx *sql.Tx, taskID, requestKey string) (map[int]json.RawMessage, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT idx, value FROM partial_answers WHERE task_id = ? AND request_key = ?`, taskID, requestKey)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int]json.RawMessage{}
+	for rows.Next() {
+		var idx int
+		var v string
+		if err := rows.Scan(&idx, &v); err != nil {
+			return nil, err
+		}
+		out[idx] = json.RawMessage(v)
+	}
+	return out, rows.Err()
 }

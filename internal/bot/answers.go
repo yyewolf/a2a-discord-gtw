@@ -211,41 +211,32 @@ func (g *Gateway) record(ctx context.Context, id render.ID, in Interaction, req 
 // collect builds the answer message once every part of the request has been
 // answered.
 func (g *Gateway) collect(ctx context.Context, task *a2a.Task, req *kagent.Request) (*a2a.Message, bool, error) {
-	parts, err := g.store.Partials(ctx, string(task.ID), req.Key())
-	if err != nil {
+	n := len(req.Questions)
+	if req.IsApproval() {
+		n = len(req.Tools)
+	}
+	parts, ok, err := g.store.TakePartials(ctx, string(task.ID), req.Key(), n)
+	if err != nil || !ok {
 		return nil, false, err
 	}
-	var msg *a2a.Message
 	if req.IsApproval() {
-		if len(parts) < len(req.Tools) {
-			return nil, false, nil
-		}
 		approvals := make([]kagent.Approval, len(req.Tools))
 		for i := range req.Tools {
 			if err := json.Unmarshal(parts[i], &approvals[i]); err != nil {
 				return nil, false, err
 			}
 		}
-		msg, err = kagent.ApprovalMessage(task, req, approvals, "")
-	} else {
-		if len(parts) < len(req.Questions) {
-			return nil, false, nil
+		msg, err := kagent.ApprovalMessage(task, req, approvals, "")
+		return msg, err == nil, err
+	}
+	answers := make([][]string, len(req.Questions))
+	for i := range req.Questions {
+		if err := json.Unmarshal(parts[i], &answers[i]); err != nil {
+			return nil, false, err
 		}
-		answers := make([][]string, len(req.Questions))
-		for i := range req.Questions {
-			if err := json.Unmarshal(parts[i], &answers[i]); err != nil {
-				return nil, false, err
-			}
-		}
-		msg, err = kagent.AnswerMessage(task, req, answers, "")
 	}
-	if err != nil {
-		return nil, false, err
-	}
-	if err := g.store.ClearPartials(ctx, string(task.ID)); err != nil {
-		g.log.Warn("clear partial answers", "task", task.ID, "err", err)
-	}
-	return msg, true, nil
+	msg, err := kagent.AnswerMessage(task, req, answers, "")
+	return msg, err == nil, err
 }
 
 // markAnswered replaces a request message's components with what was chosen.

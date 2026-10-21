@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 )
 
@@ -35,5 +36,33 @@ func TestPartials(t *testing.T) {
 	}
 	if got, _ := s.Partials(ctx, "t", "req"); len(got) != 0 {
 		t.Fatalf("after clear = %v", got)
+	}
+}
+
+func TestTakePartials(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	_ = s.SetPartial(ctx, "t", "req", 0, []string{"a"})
+	if _, ok, err := s.TakePartials(ctx, "t", "req", 2); ok || err != nil {
+		t.Fatalf("took an incomplete set: %v, %v", ok, err)
+	}
+	_ = s.SetPartial(ctx, "t", "req", 1, []string{"b"})
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	taken := 0
+	for range 8 {
+		wg.Go(func() {
+			if _, ok, err := s.TakePartials(ctx, "t", "req", 2); err != nil {
+				t.Error(err)
+			} else if ok {
+				mu.Lock()
+				taken++
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	if taken != 1 {
+		t.Fatalf("the complete set was taken %d times", taken)
 	}
 }
