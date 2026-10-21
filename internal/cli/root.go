@@ -40,7 +40,7 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 	e.cfg.BindFlags(root.PersistentFlags())
-	root.AddCommand(newVersionCmd(), newServeCmd(e))
+	root.AddCommand(newVersionCmd(), newServeCmd(e), newHealthcheckCmd(e))
 	return root
 }
 

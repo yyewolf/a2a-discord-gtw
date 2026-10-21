@@ -3,6 +3,10 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -27,6 +31,34 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+func TestHealthcheck(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		wantErr bool
+	}{
+		{"healthy", http.StatusOK, false},
+		{"unhealthy", http.StatusServiceUnavailable, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/healthz" {
+					http.NotFound(w, r)
+					return
+				}
+				w.WriteHeader(c.status)
+			}))
+			defer srv.Close()
+			_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+			_, err := run(t, "healthcheck", "--listen", fmt.Sprintf(":%s", port))
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
 func TestServeNeedsToken(t *testing.T) {
 	t.Setenv("ADG_DISCORD_TOKEN", "")
 	t.Setenv("ADG_DISCORD_TOKEN_FILE", "")
@@ -36,3 +68,8 @@ func TestServeNeedsToken(t *testing.T) {
 	}
 }
 
+func TestRejectsBadLogLevel(t *testing.T) {
+	if _, err := run(t, "healthcheck", "--log-level", "loud"); err == nil {
+		t.Fatal("expected an error")
+	}
+}
