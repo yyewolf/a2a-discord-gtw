@@ -38,6 +38,17 @@ var migrations = []string{
 		created_at        TIMESTAMP NOT NULL,
 		UNIQUE (agent, context_id)
 	)`,
+	// 3: what has been posted for each task, so a restart or the watcher
+	// does not post it twice.
+	`CREATE TABLE tasks (
+		task_id     TEXT PRIMARY KEY,
+		agent       TEXT    NOT NULL,
+		context_id  TEXT    NOT NULL,
+		state       TEXT    NOT NULL,
+		posted_len  INTEGER NOT NULL DEFAULT 0,
+		request_key TEXT    NOT NULL DEFAULT '',
+		updated_at  TIMESTAMP NOT NULL
+	)`,
 }
 
 // Open opens (creating if needed) the database at path and migrates it.
