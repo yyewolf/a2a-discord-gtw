@@ -94,6 +94,9 @@ func TestManyChoicesFallBackToSelect(t *testing.T) {
 	if len(sel.Options) != 25 {
 		t.Fatalf("%d options", len(sel.Options))
 	}
+	if !strings.Contains(m.Content, "Only the first 25 of 30 choices") {
+		t.Fatalf("content = %q", m.Content)
+	}
 }
 
 func TestApprovalMessage(t *testing.T) {

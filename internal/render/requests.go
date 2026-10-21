@@ -53,6 +53,11 @@ func QuestionMessages(agent, taskID string, req *kagent.Request, notify []snowfl
 		if q.Multiple {
 			b.WriteString("\n-# Pick one or more.")
 		}
+		if len(q.Choices) > maxSelectValues {
+			// Discord menus hold 25 options; say so rather than drop the
+			// rest silently.
+			fmt.Fprintf(&b, "\n-# Only the first %d of %d choices fit in the menu; use Other… for the rest.", maxSelectValues, len(q.Choices))
+		}
 		m := discord.NewMessageCreate().
 			WithContent(Truncate(b.String(), MessageLimit)).
 			WithAllowedMentions(allowed)
