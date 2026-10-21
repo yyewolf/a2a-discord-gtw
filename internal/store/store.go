@@ -63,6 +63,11 @@ var migrations = []string{
 		value       TEXT    NOT NULL,
 		PRIMARY KEY (task_id, request_key, idx)
 	)`,
+	// 6-8: how a conversation shows its state. A thread opened on a user's
+	// message cannot edit it, so its state is a reaction instead.
+	`ALTER TABLE conversations ADD COLUMN own_status INTEGER NOT NULL DEFAULT 1`,
+	`ALTER TABLE conversations ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
 }
 
 // Open opens (creating if needed) the database at path and migrates it.

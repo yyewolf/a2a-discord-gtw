@@ -13,6 +13,7 @@ func TestConversations(t *testing.T) {
 	c := store.Conversation{
 		ThreadID: 1562536811325300746, Agent: "claude-assistant", ContextID: "ctx-1",
 		ChannelID: 1562536811325300700, StatusMessageID: 1562536811325300746, Title: "how many namespaces?",
+		Origin: "<@1>",
 	}
 	if err := s.PutConversation(ctx, c); err != nil {
 		t.Fatal(err)
@@ -27,6 +28,15 @@ func TestConversations(t *testing.T) {
 	}
 	if _, ok, _ := s.ConversationByContext(ctx, "windmill-maintainer", "ctx-1"); ok {
 		t.Fatal("context matched across agents")
+	}
+	if got.OwnStatus || got.Origin != "<@1>" || got.State != "" {
+		t.Fatalf("status fields = %+v", got)
+	}
+	if err := s.SetConversationState(ctx, c.ThreadID, "TASK_STATE_COMPLETED"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ = s.ConversationByThread(ctx, c.ThreadID); got.State != "TASK_STATE_COMPLETED" {
+		t.Fatalf("state = %q", got.State)
 	}
 	c.ThreadID++
 	if err := s.PutConversation(ctx, c); err == nil {
