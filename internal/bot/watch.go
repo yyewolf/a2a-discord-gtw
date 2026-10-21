@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -61,19 +62,22 @@ func (g *Gateway) pollAgent(ctx context.Context, a *Agent) error {
 	if err != nil {
 		return err
 	}
+	// The A2A spec leaves the list order to the server. Oldest first, so
+	// the watermark only ever passes tasks that were handled.
+	tasks = slices.DeleteFunc(tasks, func(t *a2a.Task) bool { return t.Status.Timestamp == nil })
+	slices.SortStableFunc(tasks, func(x, y *a2a.Task) int { return x.Status.Timestamp.Compare(*y.Status.Timestamp) })
 	mark := since
 	for _, t := range tasks {
-		if t.Status.Timestamp == nil {
-			continue
-		}
 		if _, live := g.streaming.Load(t.ID); live {
 			mark = later(mark, *t.Status.Timestamp)
 			continue
 		}
 		if err := g.surface(ctx, a, t); err != nil {
-			// Stop here: the watermark stays before this task, so the
-			// next poll retries it.
-			if werr := g.store.SetWatermark(ctx, a.Name, mark); werr != nil {
+			// Stop here, with the watermark just before this task: the
+			// filter is strictly "after", and a task sharing its timestamp
+			// may not have been handled either. The next poll retries from
+			// there; surfacing again what was shown is a no-op.
+			if werr := g.store.SetWatermark(ctx, a.Name, t.Status.Timestamp.Add(-time.Nanosecond)); werr != nil {
 				return werr
 			}
 			if errors.Is(err, errDeferred) {

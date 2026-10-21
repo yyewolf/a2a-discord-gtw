@@ -259,10 +259,12 @@ type fakeAgent struct {
 	onSend      func(m *a2a.Message) ([]a2a.Event, error)
 	// pendingErr, when set, is what PendingTask fails with.
 	pendingErr error
+	// taskErr makes the next Task call for an ID fail once.
+	taskErr map[a2a.TaskID]error
 }
 
 func newFakeAgent(description string) *fakeAgent {
-	return &fakeAgent{description: description, tasks: map[a2a.TaskID]*a2a.Task{}}
+	return &fakeAgent{description: description, tasks: map[a2a.TaskID]*a2a.Task{}, taskErr: map[a2a.TaskID]error{}}
 }
 
 func (a *fakeAgent) Card(context.Context) (*a2a.AgentCard, error) {
@@ -309,6 +311,10 @@ func (a *fakeAgent) put(t *a2a.Task) {
 func (a *fakeAgent) Task(_ context.Context, id a2a.TaskID) (*a2a.Task, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err, ok := a.taskErr[id]; ok {
+		delete(a.taskErr, id)
+		return nil, err
+	}
 	t, ok := a.tasks[id]
 	if !ok {
 		return nil, fmt.Errorf("fake: no task %s", id)
@@ -327,7 +333,9 @@ func (a *fakeAgent) TasksSince(_ context.Context, since time.Time) ([]*a2a.Task,
 			out = append(out, &cp)
 		}
 	}
-	slices.SortFunc(out, func(x, y *a2a.Task) int { return x.Status.Timestamp.Compare(*y.Status.Timestamp) })
+	// Newest first, as a2a-go's in-memory store lists them: the gateway must
+	// not depend on the server's order.
+	slices.SortFunc(out, func(x, y *a2a.Task) int { return y.Status.Timestamp.Compare(*x.Status.Timestamp) })
 	return out, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -172,7 +173,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(req.Params, &p)
 		s.mu.Lock()
 		var out []*a2a.Task
-		for _, id := range s.order {
+		// Newest first, as a2a-go's in-memory task store lists them.
+		for _, id := range slices.Backward(s.order) {
 			t := s.tasks[id]
 			if p.StatusTimestampAfter != nil && !t.Status.Timestamp.After(*p.StatusTimestampAfter) {
 				continue

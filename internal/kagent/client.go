@@ -115,8 +115,8 @@ func (a *Agent) Task(ctx context.Context, id a2a.TaskID) (*a2a.Task, error) {
 	return t, nil
 }
 
-// TasksSince lists tasks whose status changed after since, oldest first as
-// kagent returns them, following pagination.
+// TasksSince lists tasks whose status changed after since, following
+// pagination, in the server's order (the A2A spec does not fix one).
 func (a *Agent) TasksSince(ctx context.Context, since time.Time) ([]*a2a.Task, error) {
 	var out []*a2a.Task
 	req := &a2a.ListTasksRequest{StatusTimestampAfter: &since, PageSize: 100}

@@ -2,6 +2,8 @@ package bot_test
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -109,5 +111,32 @@ func TestWatchUsesKnownConversation(t *testing.T) {
 	}
 	if got := h.discord.in(thread); got[len(got)-1].Content != "second" {
 		t.Fatalf("thread = %+v", got)
+	}
+}
+
+// A task that fails to surface is retried, together with every task after
+// it, whatever order the server lists them in.
+func TestWatchRetriesAFailedTask(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	ctx := context.Background()
+	h.gw.Poll(ctx)
+	w := h.agents["windmill-maintainer"]
+	at := time.Now().Add(time.Second)
+	w.put(scheduled("older", a2a.TaskStateCompleted, at, "first run"))
+	w.put(scheduled("newer", a2a.TaskStateCompleted, at.Add(time.Second), "second run"))
+	w.taskErr["older"] = errors.New("kagent hiccup")
+
+	h.gw.Poll(ctx)
+	h.gw.Poll(ctx)
+
+	var seen []string
+	for _, m := range h.discord.in(h.channel("windmill-maintainer")) {
+		for _, r := range h.discord.in(m.ID) {
+			seen = append(seen, r.Content)
+		}
+	}
+	if !slices.Equal(seen, []string{"first run", "second run"}) {
+		t.Fatalf("surfaced %q", seen)
 	}
 }
