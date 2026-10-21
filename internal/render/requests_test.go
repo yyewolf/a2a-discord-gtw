@@ -133,3 +133,19 @@ func TestAnswered(t *testing.T) {
 		t.Fatalf("content = %q", *u.Content)
 	}
 }
+
+func TestRecoverFromRenderedRequests(t *testing.T) {
+	q := render.QuestionMessages("a", "t", &kagent.Request{ID: "r", Questions: []kagent.Question{{Question: "Force-push\nprimary?"}}}, []snowflake.ID{owner})[0]
+	if got := render.QuestionIn(q.Content); got != "Force-push primary?" {
+		t.Fatalf("question = %q", got)
+	}
+	if got := render.QuestionIn("no quote here"); got != "Your answer" {
+		t.Fatalf("fallback = %q", got)
+	}
+	a := render.ApprovalMessage("a", "t", &kagent.Request{Tools: []kagent.ToolCall{{ID: "1", Name: "delete_file"}, {ID: "2", Name: "restart_pod"}}}, nil)
+	for i, want := range []string{"delete_file", "restart_pod", "this call"} {
+		if got := render.ToolIn(a.Content, i); got != want {
+			t.Errorf("tool %d = %q, want %q", i, got, want)
+		}
+	}
+}

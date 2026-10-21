@@ -183,3 +183,34 @@ func quote(s string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// QuestionIn recovers the question from a message QuestionMessages made, so
+// a modal can be opened without asking kagent first: Discord gives the bot
+// three seconds to answer an interaction.
+func QuestionIn(content string) string {
+	var lines []string
+	for line := range strings.SplitSeq(content, "\n") {
+		if q, ok := strings.CutPrefix(line, "> "); ok {
+			lines = append(lines, q)
+		} else if len(lines) > 0 {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return "Your answer"
+	}
+	return strings.Join(lines, " ")
+}
+
+// ToolIn recovers the name of tool i from a message ApprovalMessage made.
+func ToolIn(content string, i int) string {
+	prefix := fmt.Sprintf("**%d.** `", i+1)
+	for line := range strings.SplitSeq(content, "\n") {
+		if rest, ok := strings.CutPrefix(line, prefix); ok {
+			if name, _, ok := strings.Cut(rest, "`"); ok {
+				return name
+			}
+		}
+	}
+	return "this call"
+}
