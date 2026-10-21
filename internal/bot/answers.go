@@ -61,7 +61,7 @@ func (g *Gateway) HandleInteraction(ctx context.Context, in Interaction) {
 	}
 	switch id.Kind {
 	case render.KindOther, render.KindReject, render.KindRejectAll:
-		g.openModal(ctx, agent, id, in)
+		g.openModal(id, in)
 		return
 	}
 	if err := in.Acknowledge(); err != nil {
@@ -117,28 +117,23 @@ func (g *Gateway) pending(ctx context.Context, agent *Agent, id render.ID, in In
 	return task, req, true
 }
 
-func (g *Gateway) openModal(ctx context.Context, agent *Agent, id render.ID, in Interaction) {
-	_, req, ok := g.pending(ctx, agent, id, in)
-	if !ok {
-		// The interaction still needs a response.
-		g.ephemeral(in, "This request is no longer pending.")
-		return
+// openModal answers a "Other…" or "Reject…" button with its modal at once,
+// labelled from the message the button is on: Discord gives three seconds,
+// so no call to kagent comes first. The answer is checked on submit.
+func (g *Gateway) openModal(id render.ID, in Interaction) {
+	content := ""
+	if m, ok := in.Message(); ok {
+		content = m.Content
 	}
 	submit := id
 	var modal discord.ModalCreate
 	switch id.Kind {
 	case render.KindOther:
-		if id.Index >= len(req.Questions) {
-			return
-		}
 		submit.Kind = render.KindOtherSubmit
-		modal = render.AnswerModal(submit, req.Questions[id.Index].Question)
+		modal = render.AnswerModal(submit, render.QuestionIn(content))
 	case render.KindReject:
-		if id.Index >= len(req.Tools) {
-			return
-		}
 		submit.Kind = render.KindRejectSubmit
-		modal = render.RejectModal(submit, req.Tools[id.Index].Name)
+		modal = render.RejectModal(submit, render.ToolIn(content, id.Index))
 	default:
 		submit.Kind = render.KindRejectAllDone
 		modal = render.RejectModal(submit, "all")

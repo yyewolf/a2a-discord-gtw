@@ -3,6 +3,7 @@ package bot_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -373,5 +374,18 @@ func TestQueuedClickSeesTheNewRequest(t *testing.T) {
 	wg.Wait()
 	if answers != 1 {
 		t.Fatalf("%d answers sent", answers)
+	}
+}
+
+// The modal opens without waiting on kagent, which may be slow or down.
+func TestModalOpensWithoutKagent(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	_, msgs := pausedOn(t, h, askUser(map[string]any{"question": "Why?"}))
+	h.agents["claude-assistant"].taskErr["t1"] = errors.New("kagent down")
+	in := &fakeInteraction{user: ownerID, customID: component(t, msgs[0], render.KindOther, 0), msg: on(msgs[0])}
+	h.gw.HandleInteraction(context.Background(), in)
+	if in.modal == nil || len(in.ephemeral) != 0 {
+		t.Fatalf("modal = %v, ephemeral = %q", in.modal, in.ephemeral)
 	}
 }
