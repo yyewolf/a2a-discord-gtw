@@ -39,8 +39,14 @@ func TestParseFileDefaults(t *testing.T) {
 	if !ok || !a.Watch {
 		t.Fatalf("agent = %+v, %v", a, ok)
 	}
-	if got := a.URL(f.Kagent.URL); got != "http://kagent-controller.kagent.svc.cluster.local:8083/agents/kagent/windmill-maintainer" {
-		t.Fatalf("url = %q", got)
+	for base, want := range map[string]string{
+		f.Kagent.URL:                   "http://kagent-controller.kagent.svc.cluster.local:8083/agents/kagent/windmill-maintainer",
+		"https://example.com/kagent":   "https://example.com/kagent/agents/kagent/windmill-maintainer",
+		"https://example.com/kagent//": "https://example.com/kagent/agents/kagent/windmill-maintainer",
+	} {
+		if got, err := a.URL(base); err != nil || got != want {
+			t.Errorf("URL(%q) = %q, %v; want %q", base, got, err, want)
+		}
 	}
 }
 

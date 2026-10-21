@@ -52,7 +52,11 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *App, err 
 	}
 	clients := map[string]bot.AgentClient{}
 	for _, ag := range file.Agents {
-		c, err := kagent.NewAgent(ctx, ag.URL(file.Kagent.URL), kagent.Options{UserID: file.Kagent.UserID})
+		u, err := ag.URL(file.Kagent.URL)
+		if err != nil {
+			return nil, err
+		}
+		c, err := kagent.NewAgent(ctx, u, kagent.Options{UserID: file.Kagent.UserID})
 		if err != nil {
 			return nil, err
 		}

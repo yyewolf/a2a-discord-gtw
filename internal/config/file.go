@@ -66,9 +66,14 @@ func (a Agent) Namespace() string { ns, _, _ := strings.Cut(a.Ref, "/"); return 
 // AgentName is the kagent name half of Ref.
 func (a Agent) AgentName() string { _, n, _ := strings.Cut(a.Ref, "/"); return n }
 
-// URL is the agent's A2A JSON-RPC endpoint under the kagent base URL.
-func (a Agent) URL(base string) string {
-	return strings.TrimRight(base, "/") + "/agents/" + a.Namespace() + "/" + a.AgentName()
+// URL is the agent's A2A JSON-RPC endpoint under the kagent base URL, which
+// may carry a path prefix of its own.
+func (a Agent) URL(base string) (string, error) {
+	u, err := url.JoinPath(base, "agents", a.Namespace(), a.AgentName())
+	if err != nil {
+		return "", fmt.Errorf("config: url of agent %s: %w", a.Name, err)
+	}
+	return u, nil
 }
 
 const (
