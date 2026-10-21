@@ -21,14 +21,15 @@ type Store struct {
 
 // migrations are applied in order; the schema version is their count. Never
 // edit one that has shipped, append a new one.
-var migrations = []string{
-	// 1: the Discord channel of each agent.
-	`CREATE TABLE agent_channels (
+func migrations() []string {
+	return []string{
+		// 1: the Discord channel of each agent.
+		`CREATE TABLE agent_channels (
 		agent      TEXT PRIMARY KEY,
 		channel_id INTEGER NOT NULL
 	)`,
-	// 2: one thread per conversation (agent + A2A context).
-	`CREATE TABLE conversations (
+		// 2: one thread per conversation (agent + A2A context).
+		`CREATE TABLE conversations (
 		thread_id         INTEGER PRIMARY KEY,
 		agent             TEXT    NOT NULL,
 		context_id        TEXT    NOT NULL,
@@ -38,9 +39,9 @@ var migrations = []string{
 		created_at        TIMESTAMP NOT NULL,
 		UNIQUE (agent, context_id)
 	)`,
-	// 3: what has been posted for each task, so a restart or the watcher
-	// does not post it twice.
-	`CREATE TABLE tasks (
+		// 3: what has been posted for each task, so a restart or the watcher
+		// does not post it twice.
+		`CREATE TABLE tasks (
 		task_id     TEXT PRIMARY KEY,
 		agent       TEXT    NOT NULL,
 		context_id  TEXT    NOT NULL,
@@ -49,25 +50,26 @@ var migrations = []string{
 		request_key TEXT    NOT NULL DEFAULT '',
 		updated_at  TIMESTAMP NOT NULL
 	)`,
-	// 4: how far the watcher has read each agent's task list.
-	`CREATE TABLE watermarks (
+		// 4: how far the watcher has read each agent's task list.
+		`CREATE TABLE watermarks (
 		agent TEXT PRIMARY KEY,
 		at    TIMESTAMP NOT NULL
 	)`,
-	// 5: answers collected so far for a request with several questions or
-	// several tools; kagent wants them all in one message.
-	`CREATE TABLE partial_answers (
+		// 5: answers collected so far for a request with several questions or
+		// several tools; kagent wants them all in one message.
+		`CREATE TABLE partial_answers (
 		task_id     TEXT    NOT NULL,
 		request_key TEXT    NOT NULL,
 		idx         INTEGER NOT NULL,
 		value       TEXT    NOT NULL,
 		PRIMARY KEY (task_id, request_key, idx)
 	)`,
-	// 6-8: how a conversation shows its state. A thread opened on a user's
-	// message cannot edit it, so its state is a reaction instead.
-	`ALTER TABLE conversations ADD COLUMN own_status INTEGER NOT NULL DEFAULT 1`,
-	`ALTER TABLE conversations ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
+		// 6-8: how a conversation shows its state. A thread opened on a user's
+		// message cannot edit it, so its state is a reaction instead.
+		`ALTER TABLE conversations ADD COLUMN own_status INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE conversations ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
+	}
 }
 
 // Open opens (creating if needed) the database at path and migrates it.
@@ -111,15 +113,16 @@ func (s *Store) migrate(ctx context.Context) error {
 	case err != nil:
 		return fmt.Errorf("store: migrate: %w", err)
 	}
-	if version > len(migrations) {
-		return fmt.Errorf("store: database schema %d is newer than this build (%d)", version, len(migrations))
+	steps := migrations()
+	if version > len(steps) {
+		return fmt.Errorf("store: database schema %d is newer than this build (%d)", version, len(steps))
 	}
-	for i := version; i < len(migrations); i++ {
+	for i := version; i < len(steps); i++ {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("store: migrate: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
+		if _, err := tx.ExecContext(ctx, steps[i]); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("store: migration %d: %w", i+1, err)
 		}
