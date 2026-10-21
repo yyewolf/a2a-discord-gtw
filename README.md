@@ -112,6 +112,68 @@ kagent, mount the configuration from a ConfigMap and the token from a Secret,
 and allow egress to kagent's controller and to Discord (`discord.com`,
 `gateway.discord.gg` and its `*.discord.gg` resume hosts).
 
+## Install with Helm
+
+Each release publishes a chart at
+`oci://ghcr.io/yyewolf/charts/a2a-discord-gtw`, signed like the image and
+versioned with it: chart `0.3.0` deploys image `0.3.0`.
+
+The chart never takes the token itself; put it in a Secret first:
+
+```sh
+kubectl create namespace a2a-discord-gtw
+kubectl -n a2a-discord-gtw create secret generic a2a-discord-gtw \
+  --from-literal=token=<bot token>
+```
+
+The minimal values are that Secret's name and the configuration under
+`config`, with the same keys as `config.example.yaml`. Quote the Discord IDs:
+unquoted, YAML reads them as numbers and the chart's schema refuses them.
+
+```yaml
+# values.yaml
+discordToken:
+  existingSecret: a2a-discord-gtw
+config:
+  discord:
+    guild_id: "1027556538560282765"
+    category_id: "1562536781361188945"
+    allowed_user_ids: ["<your Discord user ID>"]
+  kagent:
+    url: http://kagent-controller.kagent.svc.cluster.local:8083
+  agents:
+    - name: claude-assistant
+      ref: kagent/claude-assistant
+```
+
+```sh
+helm install a2a-discord-gtw oci://ghcr.io/yyewolf/charts/a2a-discord-gtw \
+  --namespace a2a-discord-gtw -f values.yaml
+```
+
+The chart runs exactly one replica with the `Recreate` strategy, and neither
+is a setting. The bot holds one Discord gateway session, so a second pod would
+answer every message again, and its state is a SQLite database on a
+ReadWriteOnce volume (100Mi by default). A rolling update would briefly run
+the old and the new pod side by side; `Recreate` stops the old one first, at
+the cost of a few seconds offline per upgrade. Turning `persistence.enabled`
+off puts the database in an `emptyDir`, and every restart then forgets which
+thread belongs to which conversation.
+
+Changing `config` rolls the pod. With Cilium, `networkPolicy.enabled: true`
+adds a policy allowing only DNS, kagent's controller and Discord out and the
+kubelet's probes in; if kagent's namespace has its own ingress policy, it must
+admit the bot's namespace too. Everything else is in
+[`values.yaml`](charts/a2a-discord-gtw/values.yaml).
+
+To check the chart's signature:
+
+```sh
+cosign verify ghcr.io/yyewolf/charts/a2a-discord-gtw:<version> \
+  --certificate-identity-regexp '^https://github.com/yyewolf/a2a-discord-gtw/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## kagent notes
 
 - kagent 1.0 serves A2A v1 (`SendMessage`, `SendStreamingMessage`,
