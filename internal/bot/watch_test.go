@@ -99,8 +99,10 @@ func TestWatchUsesKnownConversation(t *testing.T) {
 	// Started from Discord, then continued after a restart.
 	w.onSend = func(*a2a.Message) ([]a2a.Event, error) { return reply("t1", "ctx-1", "first"), nil }
 	thread := h.say(h.channel("windmill-maintainer"), ownerID, "hello")
-	next := &a2a.Task{ID: "t2", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted, Timestamp: new(time.Now().Add(time.Second))},
-		Artifacts: []*a2a.Artifact{{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("second")}}}}
+	next := &a2a.Task{
+		ID: "t2", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted, Timestamp: new(time.Now().Add(time.Second))},
+		Artifacts: []*a2a.Artifact{{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("second")}}},
+	}
 	w.put(next)
 	h.gw.Poll(ctx)
 	if got := h.discord.in(h.channel("windmill-maintainer")); len(got) != 1 {

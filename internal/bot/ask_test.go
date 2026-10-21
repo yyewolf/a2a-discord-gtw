@@ -19,8 +19,10 @@ func TestAsk(t *testing.T) {
 		wantReply string
 	}{
 		{
-			name:      "agent option anywhere",
-			ask:       func(*harness) bot.Ask { return bot.Ask{UserID: ownerID, ChannelID: 4242, Agent: "windmill-maintainer", Prompt: "status?"} },
+			name: "agent option anywhere",
+			ask: func(*harness) bot.Ask {
+				return bot.Ask{UserID: ownerID, ChannelID: 4242, Agent: "windmill-maintainer", Prompt: "status?"}
+			},
 			wantAgent: "windmill-maintainer", wantReply: "Started in <#",
 		},
 		{
@@ -41,8 +43,10 @@ func TestAsk(t *testing.T) {
 			wantReply: "no agent called **nope**",
 		},
 		{
-			name:      "stranger",
-			ask:       func(*harness) bot.Ask { return bot.Ask{UserID: strangerID, Agent: "claude-assistant", Prompt: "status?"} },
+			name: "stranger",
+			ask: func(*harness) bot.Ask {
+				return bot.Ask{UserID: strangerID, Agent: "claude-assistant", Prompt: "status?"}
+			},
 			wantReply: "Only the agents' owners",
 		},
 	}

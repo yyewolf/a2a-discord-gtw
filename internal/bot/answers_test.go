@@ -152,7 +152,9 @@ func TestAnswerRefusals(t *testing.T) {
 		},
 		{
 			name: "unknown task", user: ownerID,
-			customID:  func([]fakeMessage) string { return render.ID{Kind: render.KindChoice, Task: "nope", Key: "req-1"}.String() },
+			customID: func([]fakeMessage) string {
+				return render.ID{Kind: render.KindChoice, Task: "nope", Key: "req-1"}.String()
+			},
 			ephemeral: "do not know this task",
 		},
 	}
