@@ -3,6 +3,7 @@ package kagent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +143,21 @@ func TestCard(t *testing.T) {
 	card, err := newAgent(t, srv).Card(context.Background())
 	if err != nil || card.Description != "Keeps the fork rebased." {
 		t.Fatalf("card = %+v, err = %v", card, err)
+	}
+}
+
+func TestPendingTask(t *testing.T) {
+	srv := kagenttest.New()
+	defer srv.Close()
+	paused := decodeTask(t, askUserTask)
+	srv.PutTask(&a2a.Task{ID: "done", ContextID: paused.ContextID, Status: a2a.TaskStatus{State: a2a.TaskStateCompleted}})
+	srv.PutTask(paused)
+	a := newAgent(t, srv)
+	got, err := a.PendingTask(context.Background(), paused.ContextID)
+	if err != nil || got.ID != paused.ID {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if _, err := a.PendingTask(context.Background(), "other"); !errors.Is(err, kagent.ErrNoRequest) {
+		t.Fatalf("err = %v", err)
 	}
 }

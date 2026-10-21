@@ -130,6 +130,22 @@ func (a *Agent) TasksSince(ctx context.Context, since time.Time) ([]*a2a.Task, e
 	return out, errors.New("kagent: list tasks: too many pages")
 }
 
+// PendingTask returns the task of a context that is waiting for input, or
+// ErrNoRequest if there is none.
+func (a *Agent) PendingTask(ctx context.Context, contextID string) (*a2a.Task, error) {
+	res, err := a.client.ListTasks(a.ctx(ctx), &a2a.ListTasksRequest{ContextID: contextID, Status: a2a.TaskStateInputRequired, PageSize: 10})
+	if err != nil {
+		return nil, fmt.Errorf("kagent: list pending tasks: %w", err)
+	}
+	for _, t := range res.Tasks {
+		// Filter here too, in case the server ignores the status filter.
+		if t.ContextID == contextID && t.Status.State == a2a.TaskStateInputRequired {
+			return a.Task(ctx, t.ID)
+		}
+	}
+	return nil, ErrNoRequest
+}
+
 // Cancel cancels a task.
 func (a *Agent) Cancel(ctx context.Context, id a2a.TaskID) error {
 	if _, err := a.client.CancelTask(a.ctx(ctx), &a2a.CancelTaskRequest{ID: id}); err != nil {
