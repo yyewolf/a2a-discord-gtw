@@ -117,6 +117,13 @@ func (g *Gateway) ChannelsReady(context.Context) error {
 	return errors.Join(errs...)
 }
 
+// inCategory reports whether a channel is in the agents' category; channels
+// outside it are not the gateway's.
+func (g *Gateway) inCategory(ch discord.Channel) bool {
+	gc, ok := ch.(discord.GuildChannel)
+	return ok && gc.ParentID() != nil && *gc.ParentID() == g.category
+}
+
 // channelHint explains Discord's "Missing Permissions" on channel creation.
 func channelHint(err error, category snowflake.ID) error {
 	var re *rest.Error
@@ -132,26 +139,30 @@ func (g *Gateway) ensureChannel(ctx context.Context, a *Agent, existing *[]disco
 		return 0, err
 	}
 	if ok {
-		_, err := g.discord.GetChannel(snowflake.ID(stored), rest.WithCtx(ctx))
+		ch, err := g.discord.GetChannel(snowflake.ID(stored), rest.WithCtx(ctx))
 		switch {
-		case err == nil:
+		case err == nil && g.inCategory(ch):
 			return snowflake.ID(stored), nil
-		case !isUnknownChannel(err):
+		case err == nil:
+			g.log.Info("agent channel was moved out of the category, replacing it", "agent", a.Name, "channel", stored)
+		case isUnknownChannel(err):
+			g.log.Info("agent channel was deleted, recreating it", "agent", a.Name, "channel", stored)
+		default:
 			return 0, err
 		}
-		g.log.Info("agent channel was deleted, recreating it", "agent", a.Name, "channel", stored)
-	} else {
-		if !*listed {
-			if *existing, err = g.discord.GetGuildChannels(g.guild, rest.WithCtx(ctx)); err != nil {
-				return 0, fmt.Errorf("list guild channels: %w", err)
-			}
-			*listed = true
+	}
+	// No usable record: adopt a channel of the agent's name in the
+	// category before creating one, so nothing is duplicated.
+	if !*listed {
+		if *existing, err = g.discord.GetGuildChannels(g.guild, rest.WithCtx(ctx)); err != nil {
+			return 0, fmt.Errorf("list guild channels: %w", err)
 		}
-		for _, ch := range *existing {
-			if ch.Type() == discord.ChannelTypeGuildText && ch.Name() == a.Name && ch.ParentID() != nil && *ch.ParentID() == g.category {
-				g.log.Info("adopting existing agent channel", "agent", a.Name, "channel", ch.ID())
-				return ch.ID(), g.store.SetAgentChannel(ctx, a.Name, uint64(ch.ID()))
-			}
+		*listed = true
+	}
+	for _, ch := range *existing {
+		if ch.Type() == discord.ChannelTypeGuildText && ch.Name() == a.Name && ch.ID() != snowflake.ID(stored) && g.inCategory(ch) {
+			g.log.Info("adopting existing agent channel", "agent", a.Name, "channel", ch.ID())
+			return ch.ID(), g.store.SetAgentChannel(ctx, a.Name, uint64(ch.ID()))
 		}
 	}
 

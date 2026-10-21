@@ -37,6 +37,7 @@ func TestEnsureChannelsReusesAndRecreates(t *testing.T) {
 	}{
 		{name: "restart", before: func(*harness) {}, wantSame: true},
 		{name: "deleted", before: func(h *harness) { h.discord.deleteChannel(h.channel("claude-assistant")) }},
+		{name: "moved out of the category", before: func(h *harness) { h.discord.moveChannel(h.channel("claude-assistant"), 999) }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -45,12 +46,9 @@ func TestEnsureChannelsReusesAndRecreates(t *testing.T) {
 			first := h.channel("claude-assistant")
 			c.before(h)
 			h.ensure()
-			second := h.channel("claude-assistant")
-			if (first == second) != c.wantSame {
-				t.Fatalf("first %s, second %s", first, second)
-			}
-			if got, _, _ := h.store.AgentChannel(context.Background(), "claude-assistant"); got != uint64(second) {
-				t.Fatalf("stored %d, want %s", got, second)
+			second, _, _ := h.store.AgentChannel(context.Background(), "claude-assistant")
+			if (uint64(first) == second) != c.wantSame {
+				t.Fatalf("first %s, second %d", first, second)
 			}
 		})
 	}

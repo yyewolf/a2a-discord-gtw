@@ -159,6 +159,18 @@ func (f *fakeDiscord) CreateGuildChannel(_ snowflake.ID, c discord.GuildChannelC
 	return f.channels[id], nil
 }
 
+// moveChannel puts a channel under another parent.
+func (f *fakeDiscord) moveChannel(id, parent snowflake.ID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ch := f.channels[id]
+	topic := ""
+	if tc, ok := ch.(discord.GuildTextChannel); ok && tc.Topic() != nil {
+		topic = *tc.Topic()
+	}
+	f.channels[id] = textChannel(id, ch.Name(), parent, topic)
+}
+
 func (f *fakeDiscord) deleteChannel(id snowflake.ID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
