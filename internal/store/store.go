@@ -49,6 +49,11 @@ var migrations = []string{
 		request_key TEXT    NOT NULL DEFAULT '',
 		updated_at  TIMESTAMP NOT NULL
 	)`,
+	// 4: how far the watcher has read each agent's task list.
+	`CREATE TABLE watermarks (
+		agent TEXT PRIMARY KEY,
+		at    TIMESTAMP NOT NULL
+	)`,
 }
 
 // Open opens (creating if needed) the database at path and migrates it.
