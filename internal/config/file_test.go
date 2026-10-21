@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -72,5 +73,20 @@ func TestParseFileWatchInterval(t *testing.T) {
 	f, err := config.ParseFile([]byte(validYAML + "watch:\n  interval: 45s\n"))
 	if err != nil || f.Watch.Interval != 45*time.Second {
 		t.Fatalf("f = %+v, err = %v", f, err)
+	}
+}
+
+func TestExampleConfigParses(t *testing.T) {
+	b, err := os.ReadFile("../../config.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := strings.ReplaceAll(string(b), "<your Discord user ID>", "111111111111111111")
+	f, err := config.ParseFile([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Agents) != 2 || !f.Agents[1].Watch {
+		t.Fatalf("agents = %+v", f.Agents)
 	}
 }

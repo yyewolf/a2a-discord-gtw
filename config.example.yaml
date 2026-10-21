@@ -1,0 +1,35 @@
+# a2a-discord-gtw configuration. Unknown keys are rejected, so a typo fails at
+# startup instead of silently dropping a setting.
+
+discord:
+  # The server the bot lives in.
+  guild_id: "1027556538560282765"
+  # Every agent gets a text channel in this category, created when missing.
+  category_id: "1562536781361188945"
+  # The only users whose messages and button presses reach an agent.
+  # kagent's API is unauthenticated, so this list is the access control.
+  allowed_user_ids: ["<your Discord user ID>"]
+  # Pinged when an agent needs input. Defaults to allowed_user_ids.
+  # notify_user_ids: ["<your Discord user ID>"]
+
+kagent:
+  # The controller's A2A gateway. Agents are reached at
+  # {url}/agents/{namespace}/{name}.
+  url: http://kagent-controller.kagent.svc.cluster.local:8083
+  # Sent as X-User-Id. Empty means kagent's default user, which also owns
+  # schedules created in its UI, so their tasks are visible to the watcher.
+  # user_id: ""
+
+# How often watched agents are polled for tasks started outside Discord.
+# watch:
+#   interval: 20s
+
+agents:
+  # name: the Discord channel name and the /ask choice (lowercase, digits, -
+  #   and _). ref: namespace/name in kagent.
+  - name: claude-assistant
+    ref: kagent/claude-assistant
+  # watch: surface tasks the bot did not start, such as ScheduledRuns.
+  - name: windmill-maintainer
+    ref: kagent/windmill-maintainer
+    watch: true
