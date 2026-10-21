@@ -2,6 +2,7 @@ package discordbot
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -56,14 +57,17 @@ func TestModalInteractionWithoutMessage(t *testing.T) {
 	}
 }
 
-func TestResponded(t *testing.T) {
-	var r responded
-	if r.is() {
-		t.Fatal("fresh interaction marked responded")
+func TestRespondedOnlyOnSuccess(t *testing.T) {
+	c := &componentInteraction{}
+	if err := c.respond(errors.New("401")); err == nil || c.responded {
+		t.Fatal("a failed response counted as responded")
 	}
-	r.mark()
-	if !r.is() {
-		t.Fatal("mark had no effect")
+	if err := c.respond(nil); err != nil || !c.responded {
+		t.Fatal("a successful response was not recorded")
+	}
+	m := &modalInteraction{}
+	if m.respond(errors.New("x")); m.responded {
+		t.Fatal("a failed modal response counted")
 	}
 }
 

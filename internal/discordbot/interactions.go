@@ -2,7 +2,6 @@ package discordbot
 
 import (
 	"errors"
-	"sync"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
@@ -13,25 +12,6 @@ import (
 	"github.com/yyewolf/a2a-discord-gtw/internal/render"
 )
 
-// responded tracks whether an interaction has had its initial response: after
-// it, an ephemeral notice has to be a follow-up message.
-type responded struct {
-	mu   sync.Mutex
-	done bool
-}
-
-func (r *responded) mark() {
-	r.mu.Lock()
-	r.done = true
-	r.mu.Unlock()
-}
-
-func (r *responded) is() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.done
-}
-
 func ephemeral(text string) discord.MessageCreate {
 	return discord.NewMessageCreate().WithEphemeral(true).WithContent(text)
 }
@@ -41,10 +21,12 @@ func followUp(client rest.Rest, app snowflake.ID, token, text string) error {
 	return err
 }
 
-// componentInteraction adapts a button or select menu use.
+// componentInteraction adapts a button or select menu use. It is used by
+// one goroutine. responded records a successful initial response: after
+// it, an ephemeral notice has to be a follow-up message.
 type componentInteraction struct {
-	e *events.ComponentInteractionCreate
-	r responded
+	e         *events.ComponentInteractionCreate
+	responded bool
 }
 
 var _ bot.Interaction = (*componentInteraction)(nil)
@@ -63,27 +45,29 @@ func (c *componentInteraction) Values() []string {
 func (c *componentInteraction) Message() (*discord.Message, bool) { return &c.e.Message, true }
 
 func (c *componentInteraction) Acknowledge() error {
-	c.r.mark()
-	return c.e.DeferUpdateMessage()
+	return c.respond(c.e.DeferUpdateMessage())
 }
 
 func (c *componentInteraction) Modal(m discord.ModalCreate) error {
-	c.r.mark()
-	return c.e.Modal(m)
+	return c.respond(c.e.Modal(m))
 }
 
 func (c *componentInteraction) Ephemeral(text string) error {
-	if c.r.is() {
+	if c.responded {
 		return followUp(c.e.Client().Rest, c.e.ApplicationID(), c.e.Token(), text)
 	}
-	c.r.mark()
-	return c.e.CreateMessage(ephemeral(text))
+	return c.respond(c.e.CreateMessage(ephemeral(text)))
 }
 
-// modalInteraction adapts a modal submit.
+func (c *componentInteraction) respond(err error) error {
+	c.responded = c.responded || err == nil
+	return err
+}
+
+// modalInteraction adapts a modal submit; see componentInteraction.
 type modalInteraction struct {
-	e *events.ModalSubmitInteractionCreate
-	r responded
+	e         *events.ModalSubmitInteractionCreate
+	responded bool
 }
 
 var _ bot.Interaction = (*modalInteraction)(nil)
@@ -102,11 +86,10 @@ func (m *modalInteraction) Message() (*discord.Message, bool) {
 }
 
 func (m *modalInteraction) Acknowledge() error {
-	m.r.mark()
 	if m.e.Message != nil {
-		return m.e.DeferUpdateMessage()
+		return m.respond(m.e.DeferUpdateMessage())
 	}
-	return m.e.DeferCreateMessage(true)
+	return m.respond(m.e.DeferCreateMessage(true))
 }
 
 func (m *modalInteraction) Modal(discord.ModalCreate) error {
@@ -114,9 +97,13 @@ func (m *modalInteraction) Modal(discord.ModalCreate) error {
 }
 
 func (m *modalInteraction) Ephemeral(text string) error {
-	if m.r.is() {
+	if m.responded {
 		return followUp(m.e.Client().Rest, m.e.ApplicationID(), m.e.Token(), text)
 	}
-	m.r.mark()
-	return m.e.CreateMessage(ephemeral(text))
+	return m.respond(m.e.CreateMessage(ephemeral(text)))
+}
+
+func (m *modalInteraction) respond(err error) error {
+	m.responded = m.responded || err == nil
+	return err
 }
