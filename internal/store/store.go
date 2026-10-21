@@ -27,6 +27,17 @@ var migrations = []string{
 		agent      TEXT PRIMARY KEY,
 		channel_id INTEGER NOT NULL
 	)`,
+	// 2: one thread per conversation (agent + A2A context).
+	`CREATE TABLE conversations (
+		thread_id         INTEGER PRIMARY KEY,
+		agent             TEXT    NOT NULL,
+		context_id        TEXT    NOT NULL,
+		channel_id        INTEGER NOT NULL,
+		status_message_id INTEGER NOT NULL,
+		title             TEXT    NOT NULL,
+		created_at        TIMESTAMP NOT NULL,
+		UNIQUE (agent, context_id)
+	)`,
 }
 
 // Open opens (creating if needed) the database at path and migrates it.
