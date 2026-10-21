@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "a2a-discord-gtw.fullname" . }}
+  labels:
+    {{- include "a2a-discord-gtw.labels" . | nindent 4 }}
+spec:
+  # Exactly one: the gateway holds a single Discord gateway session (a second
+  # pod would answer every message again) and owns a SQLite database.
+  replicas: 1
+  # Recreate, not RollingUpdate: the old pod must be gone before the new one
+  # connects to Discord and opens the database.
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "a2a-discord-gtw.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "a2a-discord-gtw.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "a2a-discord-gtw.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: a2a-discord-gtw
+          image: {{ include "a2a-discord-gtw.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          env:
+            - name: ADG_CONFIG
+              value: /config/config.yaml
+            - name: ADG_DATA_DIR
+              value: /data
+            - name: ADG_LISTEN
+              value: {{ printf ":%d" (int .Values.healthPort) | quote }}
+            - name: ADG_LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: ADG_DISCORD_TOKEN_FILE
+              value: /secrets/discord/token
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.healthPort }}
+              protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: discord-token
+              mountPath: /secrets/discord
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "a2a-discord-gtw.fullname" . }}
+        - name: discord-token
+          secret:
+            secretName: {{ include "a2a-discord-gtw.tokenSecret" . }}
+            items:
+              - key: {{ .Values.discordToken.existingSecretKey }}
+                path: token
+            defaultMode: 0440
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "a2a-discord-gtw.claimName" . }}
+          {{- else }}
+          # Persistence is disabled: the state is lost on every restart.
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,18 @@
+a2a-discord-gtw is starting in namespace {{ .Release.Namespace }}.
+
+It runs as a single replica with the Recreate strategy: one Discord gateway
+session and one SQLite database, so never scale it up.
+
+Watch it come up:
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "a2a-discord-gtw.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "a2a-discord-gtw.fullname" . }}
+
+The pod becomes ready once it is connected to Discord, the database is open
+and kagent at {{ .Values.config.kagent.url }} answers.
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is disabled. The state database lives in an emptyDir and
+is lost on every restart: existing threads stop being followed and watched
+tasks may be posted again. Set persistence.enabled=true to keep it.
+{{- end }}

@@ -1,0 +1,16 @@
+# Minimal values for CI (helm lint / helm template). The Secret does not need
+# to exist to render.
+discordToken:
+  existingSecret: a2a-discord-gtw
+
+config:
+  discord:
+    guild_id: "1027556538560282765"
+    category_id: "1562536781361188945"
+    allowed_user_ids: ["100000000000000001"]
+  agents:
+    - name: claude-assistant
+      ref: kagent/claude-assistant
+    - name: windmill-maintainer
+      ref: kagent/windmill-maintainer
+      watch: true

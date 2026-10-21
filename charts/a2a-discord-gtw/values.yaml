@@ -1,0 +1,181 @@
+# Default values for a2a-discord-gtw.
+#
+# The gateway holds one Discord gateway session and keeps its state in SQLite,
+# so the chart always runs exactly one replica and replaces it with the
+# Recreate strategy: two pods would both answer every message, and a rolling
+# update would briefly run two.
+
+image:
+  # -- Image repository.
+  repository: ghcr.io/yyewolf/a2a-discord-gtw
+  # -- Image tag. Empty uses the chart's appVersion, which is the release the
+  # chart was published with.
+  tag: ""
+  # -- Image digest (sha256:...). When set the image is pulled by digest; the
+  # tag is kept in the reference for readability only.
+  digest: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling the image, as [{name: ...}]. The public image needs none.
+imagePullSecrets: []
+
+# -- Override the chart name in resource names.
+nameOverride: ""
+# -- Override the full resource name.
+fullnameOverride: ""
+
+discordToken:
+  # -- Name of an existing Secret holding the Discord bot token. Required: the
+  # chart never takes the token itself, so it never lands in a values file or
+  # in the release history. Create it with
+  #   kubectl create secret generic a2a-discord-gtw --from-literal=token=<bot token>
+  # The token is read once at startup; restart the pod after rotating it.
+  existingSecret: ""
+  # -- Key of the token inside that Secret.
+  existingSecretKey: token
+
+# -- The gateway configuration, rendered as config.yaml into a ConfigMap and
+# mounted at /config/config.yaml. It mirrors config.example.yaml in the
+# repository; unknown keys are rejected by the gateway (and by the schema).
+# Discord IDs must be quoted strings: unquoted, YAML reads them as numbers and
+# they lose precision. Changing it rolls the pod.
+config:
+  discord:
+    # -- The server the bot lives in.
+    guild_id: ""
+    # -- Every agent gets a text channel in this category, created when missing.
+    category_id: ""
+    # -- The only users whose messages and button presses reach an agent.
+    # kagent's API is unauthenticated, so this list is the access control.
+    allowed_user_ids: []
+    # -- Pinged when an agent needs input. Empty means allowed_user_ids.
+    notify_user_ids: []
+  kagent:
+    # -- The controller's A2A gateway. Agents are reached at
+    # {url}/agents/{namespace}/{name}.
+    url: http://kagent-controller.kagent.svc.cluster.local:8083
+    # -- Sent as X-User-Id. Empty means kagent's default user, which also owns
+    # schedules created in its UI, so their tasks are visible to the watcher.
+    user_id: ""
+  watch:
+    # -- How often watched agents are polled for tasks started outside
+    # Discord (minimum 5s).
+    interval: 20s
+  # -- Agents shown on Discord, at most 25. name: the channel name and the /ask
+  # choice (lowercase letters, digits, - and _). ref: namespace/name in kagent.
+  # watch: surface tasks the bot did not start, such as ScheduledRuns.
+  agents: []
+  # agents:
+  #   - name: claude-assistant
+  #     ref: kagent/claude-assistant
+  #   - name: windmill-maintainer
+  #     ref: kagent/windmill-maintainer
+  #     watch: true
+
+# -- Log level: debug, info, warn or error.
+logLevel: info
+
+# -- Extra environment variables for the container, as a list of EnvVar.
+extraEnv: []
+# extraEnv:
+#   - name: TZ
+#     value: Europe/Paris
+
+persistence:
+  # -- Keep the state database on a PersistentVolumeClaim. It maps Discord
+  # threads to kagent conversations and records what was already posted. When
+  # disabled, /data is an emptyDir: the state is lost on every restart, threads
+  # stop being followed and watched tasks may be posted again.
+  enabled: true
+  # -- Use an existing PVC instead of creating one.
+  existingClaim: ""
+  # -- StorageClass of the created PVC. Empty uses the cluster default; "-"
+  # sets an empty storageClassName (no dynamic provisioning).
+  storageClass: ""
+  # -- Access modes of the created PVC. One pod uses it at a time.
+  accessModes:
+    - ReadWriteOnce
+  # -- Size of the created PVC. The database stays small.
+  size: 100Mi
+  # -- Annotations on the created PVC.
+  annotations: {}
+
+serviceAccount:
+  # -- Create a ServiceAccount. The gateway does not use the Kubernetes API and
+  # its token is never mounted.
+  create: true
+  # -- Name of the ServiceAccount. Empty uses the full name when create is
+  # true, and "default" otherwise.
+  name: ""
+  # -- Annotations on the ServiceAccount.
+  annotations: {}
+
+# -- Container port of the health endpoints (ADG_LISTEN).
+healthPort: 8080
+
+# -- Annotations on the pod. A checksum of the configuration is always added.
+podAnnotations: {}
+# -- Extra labels on the pod.
+podLabels: {}
+
+# -- Pod security context. fsGroup makes the volume writable for UID 65532.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context. The image only writes to /data.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container resources.
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+livenessProbe:
+  # -- Liveness probe on /healthz, which answers while the process runs.
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  # -- Readiness probe on /readyz, which also checks the Discord connection,
+  # the database and that kagent answers.
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# -- Node selector.
+nodeSelector: {}
+# -- Tolerations.
+tolerations: []
+# -- Affinity.
+affinity: {}
+# -- Priority class name.
+priorityClassName: ""

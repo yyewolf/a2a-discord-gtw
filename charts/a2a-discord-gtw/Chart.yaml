@@ -1,0 +1,18 @@
+apiVersion: v2
+name: a2a-discord-gtw
+description: Talk to your kagent agents from Discord (A2A).
+type: application
+# Both are overwritten at release time with the tag (helm package --version
+# --app-version), so the chart and the image always share a version.
+version: 0.0.0
+appVersion: 0.0.0
+home: https://github.com/yyewolf/a2a-discord-gtw
+sources:
+  - https://github.com/yyewolf/a2a-discord-gtw
+keywords:
+  - discord
+  - kagent
+  - a2a
+maintainers:
+  - name: yyewolf
+    url: https://github.com/yyewolf

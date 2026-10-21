@@ -1,0 +1,11 @@
+# Patterns to ignore when building the chart package.
+.DS_Store
+*.tgz
+*.swp
+*.bak
+*.tmp
+*~
+.git/
+.vscode/
+.idea/
+ci/
