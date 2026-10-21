@@ -54,7 +54,7 @@ func (c *Config) LoadToken() error {
 	if path == "" {
 		return errors.New("config: ADG_DISCORD_TOKEN or ADG_DISCORD_TOKEN_FILE must be set")
 	}
-	b, err := os.ReadFile(filepath.Clean(path))
+	b, err := os.ReadFile(filepath.Clean(path)) //nolint:gosec // the path is the operator's own setting
 	if err != nil {
 		return fmt.Errorf("config: read discord token: %w", err)
 	}
