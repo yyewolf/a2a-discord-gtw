@@ -271,3 +271,21 @@ func TestTypedReplyWhenNothingIsPending(t *testing.T) {
 		})
 	}
 }
+
+func TestShutdownMidStreamPostsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	ctx, cancel := context.WithCancel(context.Background())
+	h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		cancel() // SIGTERM while the agent is working
+		return reply("t1", "ctx-1", "partial")[:2], context.Canceled
+	}
+	ch := h.channel("claude-assistant")
+	id := h.discord.userMessage(ch, "hi")
+	h.gw.HandleMessage(ctx, bot.Message{ID: id, ChannelID: ch, GuildID: guildID, AuthorID: ownerID, Content: "hi"})
+	for _, m := range h.discord.in(id) {
+		if strings.Contains(m.Content, "Lost the connection") {
+			t.Fatalf("posted %q on shutdown", m.Content)
+		}
+	}
+}

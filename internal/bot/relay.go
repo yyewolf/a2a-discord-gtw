@@ -179,7 +179,11 @@ func (r *relay) finish(ctx context.Context, streamErr error) error {
 		}
 	}()
 	if streamErr != nil {
-		r.g.post(ctx, snowflake.ID(r.conv.ThreadID), fmt.Sprintf("⚠️ Lost the connection to **%s**: %v", r.agent.Name, streamErr))
+		// On shutdown the stream ends because ctx did; nothing was lost,
+		// and nothing can be posted any more.
+		if ctx.Err() == nil {
+			r.g.post(ctx, snowflake.ID(r.conv.ThreadID), fmt.Sprintf("⚠️ Lost the connection to **%s**: %v", r.agent.Name, streamErr))
+		}
 		return streamErr
 	}
 	if r.task == nil {
