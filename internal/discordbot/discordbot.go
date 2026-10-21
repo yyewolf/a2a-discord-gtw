@@ -47,7 +47,7 @@ type Bot struct {
 func New(token string, log *slog.Logger) (*Bot, error) {
 	b := &Bot{log: log}
 	client, err := disgo.New(token,
-		disgobot.WithLogger(log.With("component", "disgo")),
+		disgobot.WithLogger(disgoLogger(log)),
 		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMessages,
