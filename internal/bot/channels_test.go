@@ -3,6 +3,7 @@ package bot_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,26 @@ func TestEnsureChannelsWithoutCard(t *testing.T) {
 	h.ensure()
 	if ch, _ := h.discord.channelByName("claude-assistant"); ch.Topic() != nil && *ch.Topic() != "" {
 		t.Fatalf("topic = %q", *ch.Topic())
+	}
+}
+
+// One agent's channel failing does not stop the others, and says why.
+func TestEnsureChannelsKeepsGoing(t *testing.T) {
+	h := newHarness(t)
+	h.discord.failChannel = func(name string) error {
+		if name == "claude-assistant" {
+			return missingPermissions()
+		}
+		return nil
+	}
+	err := h.gw.EnsureChannels(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Manage Channels on category "+categoryID.String()) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := h.discord.channelByName("windmill-maintainer"); !ok {
+		t.Fatal("the other agent got no channel")
+	}
+	if err := h.gw.ChannelsReady(context.Background()); err == nil || !strings.Contains(err.Error(), "claude-assistant") {
+		t.Fatalf("ready = %v", err)
 	}
 }

@@ -64,8 +64,9 @@ type Gateway struct {
 	order    []string
 	idle     time.Duration
 
-	mu        sync.RWMutex
-	byChannel map[snowflake.ID]string // agent channel -> agent name
+	mu         sync.RWMutex
+	byChannel  map[snowflake.ID]string // agent channel -> agent name
+	channelErr map[string]error        // agent -> why it has no channel
 
 	// conv serialises turns on one conversation (keyed by thread ID).
 	conv keyedMutex
@@ -87,15 +88,16 @@ type Gateway struct {
 // New builds a Gateway. Call EnsureChannels before handling events.
 func New(o Options) (*Gateway, error) {
 	g := &Gateway{
-		cfg:       o.Config,
-		store:     o.Store,
-		discord:   o.Discord,
-		log:       o.Logger,
-		allowed:   map[snowflake.ID]bool{},
-		agents:    map[string]*Agent{},
-		byChannel: map[snowflake.ID]string{},
-		starting:  map[string]int{},
-		binding:   map[string]*sync.Mutex{},
+		cfg:        o.Config,
+		store:      o.Store,
+		discord:    o.Discord,
+		log:        o.Logger,
+		allowed:    map[snowflake.ID]bool{},
+		agents:     map[string]*Agent{},
+		byChannel:  map[snowflake.ID]string{},
+		channelErr: map[string]error{},
+		starting:   map[string]int{},
+		binding:    map[string]*sync.Mutex{},
 	}
 	if g.log == nil {
 		g.log = slog.New(slog.DiscardHandler)

@@ -106,7 +106,9 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 	}()
 
 	if err := a.gateway.EnsureChannels(ctx); err != nil {
-		return err
+		// The other agents work; the missing channels are retried, and
+		// /readyz reports them meanwhile.
+		a.log.Error("some agent channels are missing", "err", err)
 	}
 	guild, err := snowflake.Parse(a.file.Discord.GuildID)
 	if err != nil {
@@ -139,6 +141,7 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 func (a *App) checks() []health.Check {
 	return []health.Check{
 		{Name: "discord", Fn: a.discord.Ready},
+		{Name: "channels", Fn: a.gateway.ChannelsReady},
 		{Name: "store", Fn: a.store.Ping},
 		{Name: "kagent", Fn: func(ctx context.Context) error {
 			_, err := a.agents[0].Card(ctx)

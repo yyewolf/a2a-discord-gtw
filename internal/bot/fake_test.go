@@ -51,6 +51,8 @@ type fakeDiscord struct {
 	order    []snowflake.ID
 	threads  map[snowflake.ID]snowflake.ID // thread -> parent channel
 	typing   int
+	// failChannel, when set, can fail a channel creation.
+	failChannel func(name string) error
 	// failCreate, when set, can fail a message creation.
 	failCreate func(m discord.MessageCreate) error
 	// created logs the content of every message ever created, including
@@ -85,6 +87,10 @@ func newFakeDiscord() *fakeDiscord {
 func (f *fakeDiscord) id() snowflake.ID {
 	f.next++
 	return f.next
+}
+
+func missingPermissions() error {
+	return &rest.Error{Code: rest.JSONErrorCodeLackPermissionsToPerformAction, Message: "Missing Permissions", Response: &http.Response{StatusCode: http.StatusForbidden}}
 }
 
 func unknownChannel() error {
@@ -138,6 +144,14 @@ func (f *fakeDiscord) CreateGuildChannel(_ snowflake.ID, c discord.GuildChannelC
 	tc, ok := c.(discord.GuildTextChannelCreate)
 	if !ok {
 		return nil, fmt.Errorf("fake: unsupported channel create %T", c)
+	}
+	f.mu.Lock()
+	fail := f.failChannel
+	f.mu.Unlock()
+	if fail != nil {
+		if err := fail(tc.Name); err != nil {
+			return nil, err
+		}
 	}
 	id := f.addTextChannel(tc.Name, tc.ParentID, tc.Topic)
 	f.mu.Lock()
