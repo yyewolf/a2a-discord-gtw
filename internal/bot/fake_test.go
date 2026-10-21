@@ -341,15 +341,6 @@ func (a *fakeAgent) PendingTask(_ context.Context, contextID string) (*a2a.Task,
 	return nil, kagent.ErrNoRequest
 }
 
-func (a *fakeAgent) lastSent() *a2a.Message {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(a.sent) == 0 {
-		return nil
-	}
-	return a.sent[len(a.sent)-1]
-}
-
 // harness is a gateway wired to fakes.
 type harness struct {
 	t       *testing.T

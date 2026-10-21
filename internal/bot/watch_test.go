@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
 )
@@ -62,7 +61,7 @@ func TestWatchSurfacesScheduledRun(t *testing.T) {
 	if len(status) != 1 || status[0].Content != "🙋 **windmill-maintainer** · needs input · from kagent\n> Do your routine." {
 		t.Fatalf("status = %+v", status)
 	}
-	thread := snowflake.ID(status[0].ID)
+	thread := status[0].ID
 	got := h.discord.in(thread)
 	if len(got) != 2 || got[0].Content != "Rebased onto 1.845.0." || !strings.Contains(got[1].Content, "> Force-push primary?") {
 		t.Fatalf("thread = %+v", got)
