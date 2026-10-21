@@ -43,3 +43,26 @@ func TestConversations(t *testing.T) {
 		t.Fatal("a context was bound to a second thread")
 	}
 }
+
+func TestConversationWithoutContextYet(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	// Two threads opened before kagent answered either: no context yet.
+	for _, thread := range []uint64{1, 2} {
+		if err := s.PutConversation(ctx, store.Conversation{ThreadID: thread, Agent: "a", ChannelID: 9, StatusMessageID: thread, Title: "t"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c, ok, err := s.ConversationByThread(ctx, 1); !ok || err != nil || c.ContextID != "" {
+		t.Fatalf("got %+v, %v, %v", c, ok, err)
+	}
+	if err := s.SetConversationContext(ctx, 1, "ctx-1"); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok, _ := s.ConversationByContext(ctx, "a", "ctx-1"); !ok || c.ThreadID != 1 {
+		t.Fatalf("by context = %+v, %v", c, ok)
+	}
+	if err := s.SetConversationContext(ctx, 2, "ctx-1"); err == nil {
+		t.Fatal("a context was bound to two threads")
+	}
+}

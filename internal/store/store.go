@@ -70,6 +70,26 @@ func migrations() []string {
 		`ALTER TABLE conversations ADD COLUMN own_status INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE conversations ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
+		// 9-12: the context becomes nullable. A conversation is stored when
+		// its thread opens, before kagent has named its context; NULLs
+		// never collide in the UNIQUE constraint.
+		`CREATE TABLE conversations_v2 (
+			thread_id         INTEGER PRIMARY KEY,
+			agent             TEXT    NOT NULL,
+			context_id        TEXT,
+			channel_id        INTEGER NOT NULL,
+			status_message_id INTEGER NOT NULL,
+			title             TEXT    NOT NULL,
+			created_at        TIMESTAMP NOT NULL,
+			own_status        INTEGER NOT NULL DEFAULT 1,
+			state             TEXT    NOT NULL DEFAULT '',
+			origin            TEXT    NOT NULL DEFAULT '',
+			UNIQUE (agent, context_id)
+		)`,
+		`INSERT INTO conversations_v2 (thread_id, agent, context_id, channel_id, status_message_id, title, created_at, own_status, state, origin)
+		 SELECT thread_id, agent, NULLIF(context_id, ''), channel_id, status_message_id, title, created_at, own_status, state, origin FROM conversations`,
+		`DROP TABLE conversations`,
+		`ALTER TABLE conversations_v2 RENAME TO conversations`,
 	}
 }
 

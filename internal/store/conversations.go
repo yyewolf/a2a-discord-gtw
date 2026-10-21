@@ -10,6 +10,7 @@ import (
 
 // Conversation is a Discord thread bound to one agent's A2A context. The
 // thread hangs off StatusMessageID in ChannelID, the agent's channel.
+// ContextID is empty until kagent names the context on the first turn.
 type Conversation struct {
 	ThreadID        uint64
 	Agent           string
@@ -36,7 +37,7 @@ func (s *Store) PutConversation(ctx context.Context, c Conversation) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO conversations (thread_id, agent, context_id, channel_id, status_message_id, title, own_status, state, origin, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id64(c.ThreadID), c.Agent, c.ContextID, id64(c.ChannelID), id64(c.StatusMessageID), c.Title, c.OwnStatus, c.State, c.Origin, c.CreatedAt)
+		id64(c.ThreadID), c.Agent, nullable(c.ContextID), id64(c.ChannelID), id64(c.StatusMessageID), c.Title, c.OwnStatus, c.State, c.Origin, c.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("store: put conversation: %w", err)
 	}
@@ -56,10 +57,11 @@ func (s *Store) ConversationByContext(ctx context.Context, agent, contextID stri
 func (s *Store) conversation(ctx context.Context, where string, args ...any) (Conversation, bool, error) {
 	var c Conversation
 	var thread, channel, status int64
+	var contextID sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		`SELECT thread_id, agent, context_id, channel_id, status_message_id, title, own_status, state, origin, created_at
 		 FROM conversations `+where, args...).
-		Scan(&thread, &c.Agent, &c.ContextID, &channel, &status, &c.Title, &c.OwnStatus, &c.State, &c.Origin, &c.CreatedAt)
+		Scan(&thread, &c.Agent, &contextID, &channel, &status, &c.Title, &c.OwnStatus, &c.State, &c.Origin, &c.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Conversation{}, false, nil
 	}
@@ -67,7 +69,17 @@ func (s *Store) conversation(ctx context.Context, where string, args ...any) (Co
 		return Conversation{}, false, fmt.Errorf("store: conversation: %w", err)
 	}
 	c.ThreadID, c.ChannelID, c.StatusMessageID = uid(thread), uid(channel), uid(status)
+	c.ContextID = contextID.String
 	return c, true, nil
+}
+
+// SetConversationContext binds a stored conversation to the context kagent
+// gave its first turn.
+func (s *Store) SetConversationContext(ctx context.Context, threadID uint64, contextID string) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE conversations SET context_id = ? WHERE thread_id = ?`, contextID, id64(threadID)); err != nil {
+		return fmt.Errorf("store: set conversation context: %w", err)
+	}
+	return nil
 }
 
 // SetConversationState records the state last shown for a conversation.
@@ -77,6 +89,8 @@ func (s *Store) SetConversationState(ctx context.Context, threadID uint64, state
 	}
 	return nil
 }
+
+func nullable(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
 
 // SQLite integers are signed; Discord IDs fit in 63 bits.
 func id64(id uint64) int64 { return int64(id) } //nolint:gosec // see above
