@@ -339,3 +339,39 @@ func TestDoubleTapSendsOneAnswer(t *testing.T) {
 		t.Fatalf("%d answers sent", answers)
 	}
 }
+
+// A click queued behind the turn its twin started is checked against the
+// request as it is after that turn: here a new question, so it is refused
+// rather than sent as an answer to the wrong request.
+func TestQueuedClickSeesTheNewRequest(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	_, msgs := pausedOn(t, h, askUser(map[string]any{"question": "First?", "choices": []string{"Yes", "No"}}))
+	agent := h.agents["claude-assistant"]
+	var mu sync.Mutex
+	answers := 0
+	agent.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		mu.Lock()
+		answers++
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		// The agent asks a follow-up question: a new request on the same task.
+		msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(""))
+		msg.Metadata = map[string]any{kagent.HITLExtension: map[string]any{
+			"type": "ask_user_request", "id": "req-2",
+			"questions": []any{map[string]any{"question": "Second?", "choices": []string{"A", "B"}}},
+		}}
+		return []a2a.Event{&a2a.Task{ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateInputRequired, Message: msg}}}, nil
+	}
+	custom := component(t, msgs[0], render.KindChoice, 0)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			h.gw.HandleInteraction(context.Background(), &fakeInteraction{user: ownerID, customID: custom, msg: on(msgs[0])})
+		})
+	}
+	wg.Wait()
+	if answers != 1 {
+		t.Fatalf("%d answers sent", answers)
+	}
+}
