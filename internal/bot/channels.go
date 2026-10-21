@@ -13,7 +13,10 @@ import (
 	"github.com/yyewolf/a2a-discord-gtw/internal/render"
 )
 
-const topicLimit = 1024
+const (
+	topicLimit  = 1024
+	cardTimeout = 5 * time.Second
+)
 
 // EnsureChannels gives every agent its text channel in the category. A
 // channel recorded earlier is reused even if it was renamed; one that was
@@ -160,8 +163,11 @@ func (g *Gateway) ensureChannel(ctx context.Context, a *Agent, existing *[]disco
 		}
 	}
 
+	// The topic is a nicety: a slow kagent must not hold up startup.
+	cardCtx, cancel := context.WithTimeout(ctx, cardTimeout)
+	defer cancel()
 	topic := ""
-	if card, err := a.Client.Card(ctx); err == nil {
+	if card, err := a.Client.Card(cardCtx); err == nil {
 		topic = render.Truncate(card.Description, topicLimit)
 	} else {
 		g.log.Warn("could not read agent card for the channel topic", "agent", a.Name, "err", err)
