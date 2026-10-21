@@ -61,12 +61,14 @@ func ParseID(s string) (ID, error) {
 	if len(parts) != 6 || parts[0] != idPrefix {
 		return ID{}, fmt.Errorf("render: not a gateway component: %q", s)
 	}
-	idx, err1 := strconv.Atoi(parts[4])
-	arg, err2 := strconv.Atoi(parts[5])
+	// Unsigned and bounded, so a forged ID cannot index out of range below
+	// zero or overflow int.
+	idx, err1 := strconv.ParseUint(parts[4], 10, 16)
+	arg, err2 := strconv.ParseUint(parts[5], 10, 16)
 	if err1 != nil || err2 != nil || parts[2] == "" {
 		return ID{}, fmt.Errorf("render: malformed component id: %q", s)
 	}
-	return ID{Kind: Kind(parts[1]), Task: parts[2], Key: parts[3], Index: idx, Arg: arg}, nil
+	return ID{Kind: Kind(parts[1]), Task: parts[2], Key: parts[3], Index: int(idx), Arg: int(arg)}, nil
 }
 
 // Matches reports whether the ID was made for the request with this key.

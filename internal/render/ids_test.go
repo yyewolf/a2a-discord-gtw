@@ -51,7 +51,7 @@ func TestShortKey(t *testing.T) {
 }
 
 func TestParseIDRejects(t *testing.T) {
-	for _, s := range []string{"danger", "adg:c:t:k:1", "adg:c::k:1:2", "adg:c:t:k:x:2", "xyz:c:t:k:1:2"} {
+	for _, s := range []string{"danger", "adg:c:t:k:1", "adg:c::k:1:2", "adg:c:t:k:x:2", "xyz:c:t:k:1:2", "adg:c:t:k:-1:0", "adg:c:t:k:0:-3", "adg:c:t:k:99999999999:0"} {
 		if _, err := render.ParseID(s); err == nil {
 			t.Errorf("ParseID(%q) accepted", s)
 		}
