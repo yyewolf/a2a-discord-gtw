@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: a2a-discord-gtw
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: a2a-discord-gtw
+    main: ./cmd/a2a-discord-gtw
+    binary: a2a-discord-gtw
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/yyewolf/a2a-discord-gtw/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/yyewolf/a2a-discord-gtw/internal/buildinfo.Commit={{ .FullCommit }}
+      - -X github.com/yyewolf/a2a-discord-gtw/internal/buildinfo.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+
+dockers_v2:
+  - id: image
+    ids: [a2a-discord-gtw]
+    images: ["ghcr.io/yyewolf/a2a-discord-gtw"]
+    tags: ["{{ .Version }}", "{{ if not .Prerelease }}latest{{ end }}"]
+    platforms: [linux/amd64, linux/arm64]
+    extra_files: [docker/data/.keep]
+    sbom: true
+    labels:
+      org.opencontainers.image.title: a2a-discord-gtw
+      org.opencontainers.image.description: Discord gateway for kagent agents (A2A)
+      org.opencontainers.image.source: https://github.com/yyewolf/a2a-discord-gtw
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"
+      org.opencontainers.image.licenses: BSD-3-Clause
+    annotations:
+      org.opencontainers.image.description: Discord gateway for kagent agents (A2A)
+      org.opencontainers.image.source: https://github.com/yyewolf/a2a-discord-gtw
+      org.opencontainers.image.licenses: BSD-3-Clause
+
+docker_signs:
+  - cmd: cosign
+    args: ["sign", "${artifact}@${digest}", "--yes"]
+
+release:
+  footer: |
+    ### Verify
+
+    ```sh
+    gh attestation verify a2a-discord-gtw_{{ .Version }}_linux_amd64.tar.gz --repo yyewolf/a2a-discord-gtw
+    gh attestation verify oci://ghcr.io/yyewolf/a2a-discord-gtw:{{ .Version }} --repo yyewolf/a2a-discord-gtw
+    cosign verify ghcr.io/yyewolf/a2a-discord-gtw:{{ .Version }} \
+      --certificate-identity-regexp '^https://github.com/yyewolf/a2a-discord-gtw/' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    ```
+
+changelog:
+  use: github
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:", "^ci:"]
