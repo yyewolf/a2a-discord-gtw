@@ -44,7 +44,12 @@ func (g *Gateway) HandleInteraction(ctx context.Context, in Interaction) {
 		return
 	}
 	rec, ok, err := g.store.Task(ctx, id.Task)
-	if err != nil || !ok {
+	if err != nil {
+		g.log.Error("look up task of a component", "task", id.Task, "err", err)
+		g.ephemeral(in, "⚠️ Could not read my state; try again.")
+		return
+	}
+	if !ok {
 		g.ephemeral(in, "I do not know this task any more.")
 		return
 	}
