@@ -36,8 +36,12 @@ type relay struct {
 	// started ends the agent's "starting" mark once the context is known.
 	started func()
 
-	task       *a2a.Task
-	seen       []a2a.TaskID // every task of the turn, released from streaming at the end
+	task *a2a.Task
+	seen []a2a.TaskID // every task of the turn, released from streaming at the end
+	// rec is the record of the task being streamed; base is how much of its
+	// reply earlier turns posted, so rec.PostedLen = base + this turn's text.
+	rec        store.TaskRecord
+	base       int
 	transcript kagent.Transcript
 	msgs       []snowflake.ID
 	posted     []string
@@ -137,8 +141,26 @@ func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
 	if info.TaskID != "" && !slices.Contains(r.seen, info.TaskID) {
 		r.seen = append(r.seen, info.TaskID)
 		r.g.streaming.add(info.TaskID)
+		if err := r.track(ctx, info); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// track records a task the moment it appears, so that if the stream is cut
+// it is known and followed up (see Gateway.followUp), and continues the
+// count of its reply already posted in earlier turns.
+func (r *relay) track(ctx context.Context, info a2a.TaskInfo) error {
+	rec, ok, err := r.g.store.Task(ctx, string(info.TaskID))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		rec = store.TaskRecord{TaskID: string(info.TaskID), Agent: r.agent.Name, ContextID: info.ContextID, State: string(a2a.TaskStateWorking)}
+	}
+	r.rec, r.base = rec, rec.PostedLen
+	return r.g.store.PutTask(ctx, r.rec)
 }
 
 // flush brings the thread's reply messages in line with the transcript,
@@ -171,6 +193,12 @@ func (r *relay) flush(ctx context.Context, final bool) {
 		r.posted[i] = c
 	}
 	r.lastEdit = time.Now()
+	if r.rec.TaskID != "" {
+		r.rec.PostedLen = r.base + len([]rune(r.transcript.Text()))
+		if err := r.g.store.PutTask(ctx, r.rec); err != nil {
+			r.g.log.Warn("record posted text", "task", r.rec.TaskID, "err", err)
+		}
+	}
 }
 
 // finish posts the rest of the reply, reports a failure, and asks the

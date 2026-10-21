@@ -313,3 +313,18 @@ func TestReplyRevivesAThreadWhoseFirstTurnFailed(t *testing.T) {
 		t.Fatalf("conversation = %+v, %v", conv, ok)
 	}
 }
+
+// A task is recorded as soon as it appears, with the reply posted so far,
+// even when the stream is then cut.
+func TestTaskRecordedBeforeTheStreamEnds(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		return reply("t1", "ctx-1", "partial answer")[:3], errors.New("connection reset")
+	}
+	h.say(h.channel("claude-assistant"), ownerID, "hi")
+	rec, ok, err := h.store.Task(context.Background(), "t1")
+	if !ok || err != nil || rec.PostedLen != len("partial answer") || rec.Agent != "claude-assistant" || rec.ContextID != "ctx-1" {
+		t.Fatalf("record = %+v, %v, %v", rec, ok, err)
+	}
+}
