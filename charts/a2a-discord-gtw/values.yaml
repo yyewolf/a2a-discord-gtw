@@ -111,6 +111,15 @@ serviceAccount:
   # -- Annotations on the ServiceAccount.
   annotations: {}
 
+service:
+  # -- Expose the health port (/healthz, /readyz) through a Service. Nothing in
+  # the chart needs it; the probes go straight to the pod.
+  enabled: false
+  # -- Service type.
+  type: ClusterIP
+  # -- Service port.
+  port: 8080
+
 # -- Container port of the health endpoints (ADG_LISTEN).
 healthPort: 8080
 
