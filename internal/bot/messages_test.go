@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/bot"
@@ -15,7 +16,7 @@ import (
 )
 
 // errWaiting is kagent's refusal of a plain turn while a question is pending.
-var _ = a2a.NewError(a2a.ErrUnsupportedOperation, "native session is waiting for another task")
+var errWaiting = a2a.NewError(a2a.ErrUnsupportedOperation, "native session is waiting for another task")
 
 func textArtifact(id, text string) *a2a.TaskArtifactUpdateEvent {
 	return &a2a.TaskArtifactUpdateEvent{Artifact: &a2a.Artifact{ID: a2a.ArtifactID(id), Parts: a2a.ContentParts{a2a.NewTextPart(text)}}}
@@ -178,6 +179,53 @@ func TestStreamErrorIsReported(t *testing.T) {
 	got := h.discord.in(msgID)
 	if len(got) != 2 || !strings.Contains(got[1].Content, "connection reset") {
 		t.Fatalf("thread = %+v", got)
+	}
+}
+
+func TestQuestionIsAskedAndTypedAnswerSent(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	agent := h.agents["claude-assistant"]
+	agent.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		return question("t1", "ctx-1", kagent.Question{Question: "Red or blue?", Choices: []string{"Red", "Blue"}}), nil
+	}
+	msgID := h.say(h.channel("claude-assistant"), ownerID, "ask me")
+
+	thread := h.discord.in(msgID)
+	if len(thread) != 1 || !strings.Contains(thread[0].Content, "<@"+ownerID.String()+">") || !strings.Contains(thread[0].Content, "> Red or blue?") {
+		t.Fatalf("thread = %+v", thread)
+	}
+	if m := thread[0].Mentions; m == nil || len(m.Users) != 1 || m.Users[0] != ownerID {
+		t.Fatalf("mentions = %+v", m)
+	}
+	if n := len(thread[0].Components[0].(discord.ActionRowComponent).Components); n != 2 {
+		t.Fatalf("%d choice buttons", n)
+	}
+	if got := h.discord.message(msgID).Reactions; len(got) != 1 || got[0] != "🙋" {
+		t.Fatalf("reactions = %v", got)
+	}
+
+	var answer *a2a.Message
+	agent.onSend = func(m *a2a.Message) ([]a2a.Event, error) {
+		if m.TaskID == "" {
+			return nil, errWaiting
+		}
+		answer = m
+		return reply("t1", "ctx-1", "YOU PICKED Blue."), nil
+	}
+	h.say(msgID, ownerID, "blue")
+	if answer == nil || answer.TaskID != "t1" {
+		t.Fatalf("answer = %+v", answer)
+	}
+	payload := answer.Metadata[kagent.HITLExtension].(map[string]any)
+	if got := payload["answers"].([]any)[0].(map[string]any)["answer"].([]any)[0]; got != "Blue" {
+		t.Fatalf("answer payload = %v", payload)
+	}
+	if got := h.discord.in(msgID); got[len(got)-1].Content != "YOU PICKED Blue." {
+		t.Fatalf("thread = %+v", got)
+	}
+	if got := h.discord.message(msgID).Reactions; len(got) != 1 || got[0] != "✅" {
+		t.Fatalf("reactions = %v", got)
 	}
 }
 

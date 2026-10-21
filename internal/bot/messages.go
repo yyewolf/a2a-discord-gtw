@@ -77,7 +77,7 @@ func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message)
 	defer unlock()
 	err := g.run(ctx, agent, &conv, true, agent.Client.Stream(ctx, kagent.TextMessage(conv.ContextID, m.Content)))
 	if errors.Is(err, errWaiting) {
-		g.post(m.ChannelID, "↑ Answer the pending request first.")
+		g.answerTyped(ctx, agent, &conv, m)
 		return
 	}
 	if err != nil {
