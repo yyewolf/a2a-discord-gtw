@@ -23,6 +23,14 @@ import (
 
 const shutdownTimeout = 10 * time.Second
 
+// discordClient is what the app needs from the Discord connection.
+// *discordbot.Bot implements it.
+type discordClient interface {
+	Start(ctx context.Context, guild snowflake.ID, h discordbot.Handler) error
+	Ready(ctx context.Context) error
+	Close(ctx context.Context)
+}
+
 // App is a configured, not yet running gateway.
 type App struct {
 	cfg     config.Config
@@ -30,18 +38,27 @@ type App struct {
 	log     *slog.Logger
 	store   *store.Store
 	agents  []*kagent.Agent
-	discord *discordbot.Bot
+	discord discordClient
 	gateway *bot.Gateway
 }
 
 // New loads the agent configuration, opens the state database and builds the
 // clients. Nothing connects yet.
-func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *App, err error) {
+func New(ctx context.Context, cfg config.Config, log *slog.Logger) (*App, error) {
 	file, err := config.LoadFile(cfg.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
-	a := &App{cfg: cfg, file: file, log: log}
+	d, err := discordbot.New(cfg.DiscordToken, log)
+	if err != nil {
+		return nil, err
+	}
+	return build(ctx, cfg, file, log, d, d.Rest())
+}
+
+// build assembles an App around a Discord connection and its REST client.
+func build(ctx context.Context, cfg config.Config, file *config.File, log *slog.Logger, d discordClient, rest bot.Discord) (_ *App, err error) {
+	a := &App{cfg: cfg, file: file, log: log, discord: d}
 	defer func() {
 		if err != nil {
 			a.Close()
@@ -63,11 +80,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *App, err 
 		a.agents = append(a.agents, c)
 		clients[ag.Name] = c
 	}
-	if a.discord, err = discordbot.New(cfg.DiscordToken, log); err != nil {
-		return nil, err
-	}
 	a.gateway, err = bot.New(bot.Options{
-		Config: file, Store: a.store, Discord: a.discord.Rest(), Agents: clients, Logger: log,
+		Config: file, Store: a.store, Discord: rest, Agents: clients, Logger: log,
 	})
 	if err != nil {
 		return nil, err
