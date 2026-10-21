@@ -36,16 +36,14 @@ type Handler interface {
 type Bot struct {
 	client *disgobot.Client
 	log    *slog.Logger
-
-	mu      sync.Mutex
-	handler Handler
-	ctx     context.Context
-	work    sync.WaitGroup
+	// closeClient closes the DisGo client; a field so tests can watch the
+	// shutdown order.
+	closeClient func(ctx context.Context)
+	work        sync.WaitGroup
 }
 
 // New builds the client. It does not connect.
 func New(token string, log *slog.Logger) (*Bot, error) {
-	b := &Bot{log: log}
 	client, err := disgo.New(token,
 		disgobot.WithLogger(disgoLogger(log)),
 		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
@@ -56,30 +54,24 @@ func New(token string, log *slog.Logger) (*Bot, error) {
 		// Everything the gateway needs comes with the events or from its
 		// own store; nothing is read from DisGo's caches.
 		disgobot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsNone)),
-		disgobot.WithEventListenerFunc(b.onMessage),
-		disgobot.WithEventListenerFunc(b.onComponent),
-		disgobot.WithEventListenerFunc(b.onModal),
-		disgobot.WithEventListenerFunc(b.onCommand),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("discordbot: %w", err)
 	}
-	b.client = client
-	return b, nil
+	return &Bot{client: client, log: log, closeClient: client.Close}, nil
 }
 
 // Rest is the REST client, for the gateway.
 func (b *Bot) Rest() rest.Rest { return b.client.Rest }
 
-// Start registers the handler's commands in the guild and connects. Events
-// are handled under ctx until Close.
+// Start registers the handler's commands in the guild, subscribes h to the
+// events and connects. Events are handled under ctx, which should be
+// cancelled before Close.
 func (b *Bot) Start(ctx context.Context, guild snowflake.ID, h Handler) error {
-	b.mu.Lock()
-	b.handler, b.ctx = h, ctx
-	b.mu.Unlock()
-	if _, err := b.client.Rest.SetGuildCommands(b.client.ApplicationID, guild, h.Commands()); err != nil {
+	if _, err := b.client.Rest.SetGuildCommands(b.client.ApplicationID, guild, h.Commands(), rest.WithCtx(ctx)); err != nil {
 		return fmt.Errorf("discordbot: register commands: %w", err)
 	}
+	b.client.AddEventListeners(b.listeners(ctx, h)...)
 	if err := b.client.OpenGateway(ctx); err != nil {
 		return fmt.Errorf("discordbot: connect: %w", err)
 	}
@@ -97,18 +89,12 @@ func (b *Bot) Ready(context.Context) error {
 // Close disconnects, then waits for the events being handled; their context
 // should be cancelled first so they stop promptly.
 func (b *Bot) Close(ctx context.Context) {
-	b.client.Close(ctx)
+	b.closeClient(ctx)
 	b.work.Wait()
 }
 
-// handle runs f in the background with the context given to Start.
-func (b *Bot) handle(f func(ctx context.Context, h Handler)) {
-	b.mu.Lock()
-	h, ctx := b.handler, b.ctx
-	b.mu.Unlock()
-	if h == nil {
-		return
-	}
+// run handles one event in the background.
+func (b *Bot) run(f func()) {
 	b.work.Go(func() {
 		// One bad event must not take every conversation down with it.
 		defer func() {
@@ -116,39 +102,44 @@ func (b *Bot) handle(f func(ctx context.Context, h Handler)) {
 				b.log.Error("event handler panicked", "panic", r, "stack", string(debug.Stack()))
 			}
 		}()
-		f(ctx, h)
+		f()
 	})
 }
 
-func (b *Bot) onMessage(e *events.GuildMessageCreate) {
-	m := bot.Message{
-		ID:        e.MessageID,
-		ChannelID: e.ChannelID,
-		GuildID:   e.GuildID,
-		AuthorID:  e.Message.Author.ID,
-		AuthorBot: e.Message.Author.Bot || e.Message.Author.System,
-		Content:   e.Message.Content,
+func (b *Bot) listeners(ctx context.Context, h Handler) []disgobot.EventListener {
+	return []disgobot.EventListener{
+		disgobot.NewListenerFunc(func(e *events.GuildMessageCreate) {
+			m := bot.Message{
+				ID:        e.MessageID,
+				ChannelID: e.ChannelID,
+				GuildID:   e.GuildID,
+				AuthorID:  e.Message.Author.ID,
+				AuthorBot: e.Message.Author.Bot || e.Message.Author.System,
+				Content:   e.Message.Content,
+			}
+			b.run(func() { h.HandleMessage(ctx, m) })
+		}),
+		disgobot.NewListenerFunc(func(e *events.ComponentInteractionCreate) {
+			in := &componentInteraction{e: e}
+			b.run(func() { h.HandleInteraction(ctx, in) })
+		}),
+		disgobot.NewListenerFunc(func(e *events.ModalSubmitInteractionCreate) {
+			in := &modalInteraction{e: e}
+			b.run(func() { h.HandleInteraction(ctx, in) })
+		}),
+		disgobot.NewListenerFunc(func(e *events.ApplicationCommandInteractionCreate) {
+			b.onCommand(ctx, h, e)
+		}),
 	}
-	b.handle(func(ctx context.Context, h Handler) { h.HandleMessage(ctx, m) })
 }
 
-func (b *Bot) onComponent(e *events.ComponentInteractionCreate) {
-	in := &componentInteraction{e: e}
-	b.handle(func(ctx context.Context, h Handler) { h.HandleInteraction(ctx, in) })
-}
-
-func (b *Bot) onModal(e *events.ModalSubmitInteractionCreate) {
-	in := &modalInteraction{e: e}
-	b.handle(func(ctx context.Context, h Handler) { h.HandleInteraction(ctx, in) })
-}
-
-func (b *Bot) onCommand(e *events.ApplicationCommandInteractionCreate) {
+func (b *Bot) onCommand(ctx context.Context, h Handler, e *events.ApplicationCommandInteractionCreate) {
 	data, ok := e.Data.(discord.SlashCommandInteractionData)
 	if !ok || data.CommandName() != bot.AskCommand {
 		return
 	}
 	// Acknowledge within Discord's three seconds; the reply follows.
-	if err := e.DeferCreateMessage(true); err != nil {
+	if err := e.DeferCreateMessage(true, rest.WithCtx(ctx)); err != nil {
 		b.log.Warn("defer /ask", "err", err)
 		return
 	}
@@ -160,8 +151,8 @@ func (b *Bot) onCommand(e *events.ApplicationCommandInteractionCreate) {
 	}
 	respond := func(text string) error {
 		_, err := e.Client().Rest.UpdateInteractionResponse(e.ApplicationID(), e.Token(),
-			discord.NewMessageUpdate().WithContent(text))
+			discord.NewMessageUpdate().WithContent(text), rest.WithCtx(ctx))
 		return err
 	}
-	b.handle(func(ctx context.Context, h Handler) { h.HandleAsk(ctx, ask, respond) })
+	b.run(func() { h.HandleAsk(ctx, ask, respond) })
 }

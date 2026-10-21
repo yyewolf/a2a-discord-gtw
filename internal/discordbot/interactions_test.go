@@ -66,8 +66,8 @@ func TestResponded(t *testing.T) {
 
 func TestHandlerPanicIsContained(t *testing.T) {
 	var logs strings.Builder
-	b := &Bot{log: slog.New(slog.NewTextHandler(&logs, nil)), handler: panicky{}, ctx: context.Background()}
-	b.handle(func(ctx context.Context, h Handler) { h.HandleMessage(ctx, bot.Message{}) })
+	b := &Bot{log: slog.New(slog.NewTextHandler(&logs, nil))}
+	b.run(func() { panicky{}.HandleMessage(context.Background(), bot.Message{}) })
 	b.work.Wait()
 	if !strings.Contains(logs.String(), "event handler panicked") {
 		t.Fatalf("logs = %q", logs.String())
