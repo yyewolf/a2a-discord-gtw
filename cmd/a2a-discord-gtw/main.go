@@ -15,6 +15,9 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Once the first signal starts the graceful shutdown, give the signals
+	// back to the runtime: a second one kills the process.
+	context.AfterFunc(ctx, stop)
 	code := cli.Execute(ctx)
 	stop()
 	os.Exit(code)
