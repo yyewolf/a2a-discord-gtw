@@ -78,3 +78,30 @@ func (s *Store) UnsettledTasks(ctx context.Context) ([]TaskRecord, error) {
 	}
 	return out, nil
 }
+
+// PruneTasks forgets settled tasks last updated before cutoff, and any
+// partial answers left for them. Unsettled tasks are kept whatever their
+// age: they are still followed up.
+func (s *Store) PruneTasks(ctx context.Context, cutoff time.Time) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: prune tasks: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // a no-op after Commit
+	const settled = `state IN ('TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED') AND updated_at < ?`
+	if _, err := tx.ExecContext(ctx, `DELETE FROM partial_answers WHERE task_id IN (SELECT task_id FROM tasks WHERE `+settled+`)`, cutoff.UTC()); err != nil {
+		return 0, fmt.Errorf("store: prune tasks: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE `+settled, cutoff.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("store: prune tasks: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: prune tasks: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: prune tasks: %w", err)
+	}
+	return n, nil
+}

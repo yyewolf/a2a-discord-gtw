@@ -84,6 +84,9 @@ type Gateway struct {
 	// a context up and opening a conversation for it. Without it both can
 	// claim the same new context.
 	binding map[string]*sync.Mutex
+	// lastPrune is when settled tasks were last pruned; Poll is called
+	// from one goroutine.
+	lastPrune time.Time
 }
 
 // New builds a Gateway. Call EnsureChannels before handling events.

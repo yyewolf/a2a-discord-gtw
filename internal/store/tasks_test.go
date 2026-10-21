@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/store"
 )
@@ -48,5 +49,34 @@ func TestUnsettledTasks(t *testing.T) {
 	}
 	if len(ids) != 2 || !ids["working"] || !ids["waiting"] {
 		t.Fatalf("unsettled = %v", ids)
+	}
+}
+
+func TestPruneTasks(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	for _, r := range []store.TaskRecord{
+		{TaskID: "done", Agent: "a", ContextID: "c", State: "TASK_STATE_COMPLETED"},
+		{TaskID: "waiting", Agent: "a", ContextID: "c", State: "TASK_STATE_INPUT_REQUIRED"},
+	} {
+		if err := s.PutTask(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.SetPartial(ctx, "done", "k", 0, "x")
+	if n, err := s.PruneTasks(ctx, time.Now().Add(-time.Hour)); err != nil || n != 0 {
+		t.Fatalf("pruned %d recent tasks, %v", n, err)
+	}
+	if n, err := s.PruneTasks(ctx, time.Now().Add(time.Hour)); err != nil || n != 1 {
+		t.Fatalf("pruned %d, %v", n, err)
+	}
+	if _, ok, _ := s.Task(ctx, "done"); ok {
+		t.Fatal("settled task kept")
+	}
+	if _, ok, _ := s.Task(ctx, "waiting"); !ok {
+		t.Fatal("unsettled task pruned")
+	}
+	if _, ok, _ := s.TakePartials(ctx, "done", "k", 1); ok {
+		t.Fatal("partials of a pruned task kept")
 	}
 }

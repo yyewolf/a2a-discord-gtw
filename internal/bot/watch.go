@@ -41,6 +41,7 @@ func (g *Gateway) Watch(ctx context.Context) {
 func (g *Gateway) Poll(ctx context.Context) {
 	g.retryChannels(ctx)
 	g.followUp(ctx)
+	g.prune(ctx)
 	for _, name := range g.order {
 		a := g.agents[name]
 		if !a.Watch {
@@ -90,6 +91,29 @@ func (g *Gateway) pollAgent(ctx context.Context, a *Agent) error {
 		mark = later(mark, *t.Status.Timestamp)
 	}
 	return g.store.SetWatermark(ctx, a.Name, mark)
+}
+
+const (
+	// taskRetention is how long a settled task's record is kept: long
+	// enough for a late click on its buttons to be refused cleanly.
+	taskRetention = 30 * 24 * time.Hour
+	pruneEvery    = 24 * time.Hour
+)
+
+// prune forgets old settled tasks, at most once a day.
+func (g *Gateway) prune(ctx context.Context) {
+	if time.Since(g.lastPrune) < pruneEvery {
+		return
+	}
+	g.lastPrune = time.Now()
+	n, err := g.store.PruneTasks(ctx, time.Now().Add(-taskRetention))
+	if err != nil {
+		g.log.Warn("prune tasks", "err", err)
+		return
+	}
+	if n > 0 {
+		g.log.Info("pruned settled tasks", "count", n)
+	}
 }
 
 // followUp re-reads every recorded task that has not settled and shows what
