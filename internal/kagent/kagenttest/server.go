@@ -16,7 +16,9 @@ import (
 
 // WaitingError is kagent's answer to a new turn on a context whose task is
 // waiting for input.
-var WaitingError = &RPCError{Code: -32004, Message: "native session is waiting for another task"}
+func WaitingError() *RPCError {
+	return &RPCError{Code: -32004, Message: "native session is waiting for another task"}
+}
 
 // RPCError is a JSON-RPC error object.
 type RPCError struct {

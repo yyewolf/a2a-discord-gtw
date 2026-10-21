@@ -48,7 +48,7 @@ func TestQuestionRoundTrip(t *testing.T) {
 		case m.TaskID == "" && m.ContextID == "":
 			return []a2a.Event{paused}, nil
 		case m.TaskID == "":
-			return nil, kagenttest.WaitingError
+			return nil, kagenttest.WaitingError()
 		default:
 			done := *paused
 			done.Status = a2a.TaskStatus{State: a2a.TaskStateCompleted}
