@@ -19,12 +19,14 @@ func Chunk(text string, limit int) []string {
 	reopen := ""
 	for text != "" {
 		budget := limit - len([]rune(reopen))
-		body := text
+		body, sep := text, ""
 		if len([]rune(reopen))+len([]rune(text)) > limit {
 			// Leave room to close a fence that may be open at the break.
-			body = cut(text, budget-len("\n```"))
+			body, sep = cut(text, budget-len("\n```"))
 		}
-		text = strings.TrimLeft(text[len(body):], "\n ")
+		// Drop only the separator broken at: leading spaces of the next
+		// piece may be code indentation.
+		text = strings.TrimPrefix(text[len(body):], sep)
 		piece := reopen + body
 		fence, open := openFence(piece)
 		reopen = ""
@@ -38,22 +40,22 @@ func Chunk(text string, limit int) []string {
 }
 
 // cut returns the longest prefix of s within n runes that ends at the best
-// available boundary.
-func cut(s string, n int) string {
+// available boundary, and the separator found there ("" for a hard cut).
+func cut(s string, n int) (string, string) {
 	if n < 1 {
 		n = 1
 	}
 	r := []rune(s)
 	if len(r) <= n {
-		return s
+		return s, ""
 	}
 	head := string(r[:n])
 	for _, sep := range []string{"\n\n", "\n", " "} {
 		if i := strings.LastIndex(head, sep); i > len(head)/2 {
-			return head[:i]
+			return head[:i], sep
 		}
 	}
-	return head
+	return head, ""
 }
 
 // openFence reports whether s ends inside a ``` block, and the fence line

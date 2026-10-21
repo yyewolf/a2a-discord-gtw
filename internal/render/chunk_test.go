@@ -56,3 +56,19 @@ func TestChunkReopensCodeFences(t *testing.T) {
 		t.Fatalf("second chunk does not reopen the fence: %q", got[1])
 	}
 }
+
+func TestChunkKeepsCodeIndentation(t *testing.T) {
+	// Lines long enough that the break falls between two indented lines.
+	line := "    indented := " + strings.Repeat("x", 40) + "\n"
+	code := "```go\nfunc f() {\n" + strings.Repeat(line, 6) + "}\n```"
+	got := render.Chunk(code, 150)
+	if len(got) < 2 {
+		t.Fatalf("got %q", got)
+	}
+	for i, c := range got[1:] {
+		body := strings.TrimPrefix(c, "```go\n")
+		if !strings.HasPrefix(body, "    indented") && !strings.HasPrefix(body, "}") {
+			t.Fatalf("chunk %d lost its indentation: %q", i+1, c)
+		}
+	}
+}
