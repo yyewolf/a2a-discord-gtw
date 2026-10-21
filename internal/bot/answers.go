@@ -109,6 +109,8 @@ func (g *Gateway) pending(ctx context.Context, agent *Agent, id render.ID, in In
 func (g *Gateway) openModal(ctx context.Context, agent *Agent, id render.ID, in Interaction) {
 	_, req, ok := g.pending(ctx, agent, id, in)
 	if !ok {
+		// The interaction still needs a response.
+		g.ephemeral(in, "This request is no longer pending.")
 		return
 	}
 	submit := id
