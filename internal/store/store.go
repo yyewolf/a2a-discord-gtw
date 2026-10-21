@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -77,8 +78,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("store: create data dir: %w", err)
 	}
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
@@ -91,6 +91,15 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// dsn is a SQLite URI for path, escaped so that a path containing ? or # is
+// still a path, with the connection pragmas as query parameters.
+func dsn(path string) string {
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}).String()
 }
 
 // Close closes the database.
