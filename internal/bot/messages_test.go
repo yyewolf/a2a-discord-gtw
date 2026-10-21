@@ -244,3 +244,30 @@ func TestQuestionAskedOnce(t *testing.T) {
 		t.Fatalf("%d messages", n)
 	}
 }
+
+func TestTypedReplyWhenNothingIsPending(t *testing.T) {
+	cases := []struct {
+		name    string
+		pending error
+		want    string
+	}{
+		{"still working", nil, "still working on something"},
+		{"kagent down", errors.New("connection refused"), "Could not reach **claude-assistant**: connection refused"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.ensure()
+			agent := h.agents["claude-assistant"]
+			agent.onSend = func(*a2a.Message) ([]a2a.Event, error) { return reply("t1", "ctx-1", "hi"), nil }
+			thread := h.say(h.channel("claude-assistant"), ownerID, "hello")
+			agent.onSend = func(*a2a.Message) ([]a2a.Event, error) { return nil, errWaiting }
+			agent.pendingErr = c.pending
+			h.say(thread, ownerID, "more")
+			got := h.discord.in(thread)
+			if !strings.Contains(got[len(got)-1].Content, c.want) {
+				t.Fatalf("last message = %q", got[len(got)-1].Content)
+			}
+		})
+	}
+}

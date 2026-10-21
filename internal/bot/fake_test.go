@@ -257,6 +257,8 @@ type fakeAgent struct {
 	tasks       map[a2a.TaskID]*a2a.Task
 	sent        []*a2a.Message
 	onSend      func(m *a2a.Message) ([]a2a.Event, error)
+	// pendingErr, when set, is what PendingTask fails with.
+	pendingErr error
 }
 
 func newFakeAgent(description string) *fakeAgent {
@@ -332,6 +334,9 @@ func (a *fakeAgent) TasksSince(_ context.Context, since time.Time) ([]*a2a.Task,
 func (a *fakeAgent) PendingTask(_ context.Context, contextID string) (*a2a.Task, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.pendingErr != nil {
+		return nil, a.pendingErr
+	}
 	for _, t := range a.tasks {
 		if t.ContextID == contextID && t.Status.State == a2a.TaskStateInputRequired {
 			cp := *t

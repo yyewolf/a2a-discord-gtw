@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,8 +19,14 @@ import (
 func (g *Gateway) answerTyped(ctx context.Context, agent *Agent, conv *store.Conversation, m Message) {
 	thread := snowflake.ID(conv.ThreadID)
 	task, err := agent.Client.PendingTask(ctx, conv.ContextID)
-	if err != nil {
-		g.post(thread, fmt.Sprintf("⚠️ **%s** is busy with another task; try again in a moment.", agent.Name))
+	switch {
+	case errors.Is(err, kagent.ErrNoRequest):
+		// kagent refused the turn, yet nothing waits for input: another
+		// task of the conversation is still running.
+		g.post(thread, fmt.Sprintf("⏳ **%s** is still working on something in this conversation; try again when it is done.", agent.Name))
+		return
+	case err != nil:
+		g.post(thread, fmt.Sprintf("⚠️ Could not reach **%s**: %v", agent.Name, err))
 		return
 	}
 	req, err := kagent.PendingRequest(task)
