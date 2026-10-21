@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 
 	"github.com/disgoorg/disgo"
@@ -108,7 +109,15 @@ func (b *Bot) handle(f func(ctx context.Context, h Handler)) {
 	if h == nil {
 		return
 	}
-	b.work.Go(func() { f(ctx, h) })
+	b.work.Go(func() {
+		// One bad event must not take every conversation down with it.
+		defer func() {
+			if r := recover(); r != nil {
+				b.log.Error("event handler panicked", "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+		f(ctx, h)
+	})
 }
 
 func (b *Bot) onMessage(e *events.GuildMessageCreate) {

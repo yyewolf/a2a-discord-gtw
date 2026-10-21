@@ -1,10 +1,15 @@
 package discordbot
 
 import (
+	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
+
+	"github.com/yyewolf/a2a-discord-gtw/internal/bot"
 )
 
 func TestComponentInteractionMapping(t *testing.T) {
@@ -58,3 +63,17 @@ func TestResponded(t *testing.T) {
 		t.Fatal("mark had no effect")
 	}
 }
+
+func TestHandlerPanicIsContained(t *testing.T) {
+	var logs strings.Builder
+	b := &Bot{log: slog.New(slog.NewTextHandler(&logs, nil)), handler: panicky{}, ctx: context.Background()}
+	b.handle(func(ctx context.Context, h Handler) { h.HandleMessage(ctx, bot.Message{}) })
+	b.work.Wait()
+	if !strings.Contains(logs.String(), "event handler panicked") {
+		t.Fatalf("logs = %q", logs.String())
+	}
+}
+
+type panicky struct{ Handler }
+
+func (panicky) HandleMessage(context.Context, bot.Message) { panic("boom") }
