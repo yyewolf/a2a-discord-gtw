@@ -66,6 +66,11 @@ type Gateway struct {
 	// streaming holds the tasks a relay is following live; the watcher
 	// leaves them alone.
 	streaming sync.Map
+	// starting counts, per agent, relays whose conversation has no context
+	// yet. Until it has one, the watcher cannot tell their task from a new
+	// one, so it waits.
+	startingMu sync.Mutex
+	starting   map[string]int
 
 	// Work started by an event but outliving it (a relay after a button
 	// press) runs under runCtx and is waited for by Run.
@@ -83,6 +88,7 @@ func New(o Options) (*Gateway, error) {
 		allowed:   map[snowflake.ID]bool{},
 		agents:    map[string]*Agent{},
 		byChannel: map[snowflake.ID]string{},
+		starting:  map[string]int{},
 	}
 	if g.log == nil {
 		g.log = slog.New(slog.DiscardHandler)
@@ -195,4 +201,26 @@ func (g *Gateway) spawn(ctx context.Context, f func(ctx context.Context)) {
 	}
 	g.mu.RUnlock()
 	g.work.Go(func() { f(ctx) })
+}
+
+// beginStart marks a relay of agent as not yet bound to a context; the
+// returned func ends that, and is safe to call more than once.
+func (g *Gateway) beginStart(agent string) func() {
+	g.startingMu.Lock()
+	g.starting[agent]++
+	g.startingMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.startingMu.Lock()
+			g.starting[agent]--
+			g.startingMu.Unlock()
+		})
+	}
+}
+
+func (g *Gateway) isStarting(agent string) bool {
+	g.startingMu.Lock()
+	defer g.startingMu.Unlock()
+	return g.starting[agent] > 0
 }

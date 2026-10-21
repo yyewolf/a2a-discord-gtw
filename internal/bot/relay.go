@@ -32,6 +32,8 @@ type relay struct {
 	agent     *Agent
 	conv      *store.Conversation
 	persisted bool
+	// started ends the agent's "starting" mark once the context is known.
+	started func()
 
 	task       *a2a.Task
 	transcript kagent.Transcript
@@ -47,7 +49,11 @@ var errWaiting = errors.New("bot: conversation is waiting for an answer")
 // run consumes the event stream of one turn. conv may not be persisted yet
 // (persisted false): it is stored once the stream reveals its context.
 func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, persisted bool, events iter.Seq2[a2a.Event, error]) error {
-	r := &relay{g: g, agent: agent, conv: conv, persisted: persisted}
+	r := &relay{g: g, agent: agent, conv: conv, persisted: persisted, started: func() {}}
+	if !persisted {
+		r.started = g.beginStart(agent.Name)
+		defer r.started()
+	}
 	typingCtx, stopTyping := context.WithCancel(ctx)
 	typing := make(chan struct{})
 	go func() {
@@ -119,6 +125,7 @@ func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
 			return err
 		}
 		r.persisted = true
+		r.started()
 	}
 	if info.TaskID != "" && (r.task == nil || r.task.ID != info.TaskID) {
 		r.g.streaming.Store(info.TaskID, true)
