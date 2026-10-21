@@ -71,6 +71,11 @@ type Gateway struct {
 	// one, so it waits.
 	startingMu sync.Mutex
 	starting   map[string]int
+	// binding serialises, per agent, binding a context to a conversation:
+	// the relay naming its conversation's context, and the watcher looking
+	// a context up and opening a conversation for it. Without it both can
+	// claim the same new context.
+	binding map[string]*sync.Mutex
 }
 
 // New builds a Gateway. Call EnsureChannels before handling events.
@@ -84,6 +89,7 @@ func New(o Options) (*Gateway, error) {
 		agents:    map[string]*Agent{},
 		byChannel: map[snowflake.ID]string{},
 		starting:  map[string]int{},
+		binding:   map[string]*sync.Mutex{},
 	}
 	if g.log == nil {
 		g.log = slog.New(slog.DiscardHandler)
@@ -115,6 +121,7 @@ func New(o Options) (*Gateway, error) {
 			return nil, fmt.Errorf("bot: no client for agent %q", a.Name)
 		}
 		g.agents[a.Name] = &Agent{Agent: a, Client: c}
+		g.binding[a.Name] = &sync.Mutex{}
 		g.order = append(g.order, a.Name)
 	}
 	return g, nil

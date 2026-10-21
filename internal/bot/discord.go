@@ -20,6 +20,8 @@ type Discord interface {
 	SendTyping(channelID snowflake.ID, opts ...rest.RequestOpt) error
 	AddReaction(channelID snowflake.ID, messageID snowflake.ID, emoji string, opts ...rest.RequestOpt) error
 	RemoveOwnReaction(channelID snowflake.ID, messageID snowflake.ID, emoji string, opts ...rest.RequestOpt) error
+	DeleteMessage(channelID snowflake.ID, messageID snowflake.ID, opts ...rest.RequestOpt) error
+	DeleteChannel(channelID snowflake.ID, opts ...rest.RequestOpt) error
 }
 
 var _ Discord = rest.Rest(nil)

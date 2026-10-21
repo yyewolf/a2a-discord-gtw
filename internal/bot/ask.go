@@ -136,6 +136,13 @@ func (g *Gateway) openConversation(ctx context.Context, agent *Agent, channel sn
 		Origin:          origin,
 	}
 	if err := g.store.PutConversation(ctx, *conv); err != nil {
+		// Do not leave a thread nothing will ever answer in.
+		if derr := g.discord.DeleteChannel(th.ID(), rest.WithCtx(ctx)); derr != nil {
+			g.log.Warn("remove orphan thread", "thread", th.ID(), "err", derr)
+		}
+		if derr := g.discord.DeleteMessage(channel, status.ID, rest.WithCtx(ctx)); derr != nil {
+			g.log.Warn("remove orphan status message", "message", status.ID, "err", derr)
+		}
 		return nil, err
 	}
 	return conv, nil

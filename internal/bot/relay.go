@@ -122,11 +122,17 @@ func (r *relay) consume(ctx context.Context, events iter.Seq2[a2a.Event, error])
 func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
 	info := ev.TaskInfo()
 	if r.conv.ContextID == "" && info.ContextID != "" {
-		if err := r.g.store.SetConversationContext(ctx, r.conv.ThreadID, info.ContextID); err != nil {
+		bind := r.g.binding[r.agent.Name]
+		bind.Lock()
+		err := r.g.store.SetConversationContext(ctx, r.conv.ThreadID, info.ContextID)
+		if err == nil {
+			r.conv.ContextID = info.ContextID
+			r.started()
+		}
+		bind.Unlock()
+		if err != nil {
 			return err
 		}
-		r.conv.ContextID = info.ContextID
-		r.started()
 	}
 	if info.TaskID != "" && !slices.Contains(r.seen, info.TaskID) {
 		r.seen = append(r.seen, info.TaskID)

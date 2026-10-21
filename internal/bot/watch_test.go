@@ -3,8 +3,10 @@ package bot_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -138,5 +140,72 @@ func TestWatchRetriesAFailedTask(t *testing.T) {
 	}
 	if !slices.Equal(seen, []string{"first run", "second run"}) {
 		t.Fatalf("surfaced %q", seen)
+	}
+}
+
+// A conversation started from Discord and the watcher racing for its new
+// context end with one thread, never a second "from kagent" one.
+func TestWatchDoesNotDuplicateAStartingConversation(t *testing.T) {
+	for i := range 20 {
+		h := newHarness(t)
+		h.ensure()
+		ctx := context.Background()
+		h.gw.Poll(ctx)
+		w := h.agents["windmill-maintainer"]
+		ctxID := fmt.Sprintf("ctx-%d", i)
+		w.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+			// kagent has the task before the bot sees the first event.
+			w.put(&a2a.Task{ID: "t1", ContextID: ctxID, Status: a2a.TaskStatus{State: a2a.TaskStateWorking, Timestamp: new(time.Now().Add(time.Second))}})
+			return reply("t1", ctxID, "hi"), nil
+		}
+		done := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					h.gw.Poll(ctx)
+				}
+			}
+		})
+		h.say(h.channel("windmill-maintainer"), ownerID, "go")
+		close(done)
+		wg.Wait()
+		h.gw.Poll(ctx)
+		for _, c := range h.discord.everCreated() {
+			if strings.Contains(c, originKagentText) {
+				t.Fatalf("iteration %d: duplicate conversation %q", i, c)
+			}
+		}
+	}
+}
+
+const originKagentText = "from kagent"
+
+// A poll while a conversation started from Discord has no context yet leaves
+// its task for later instead of opening a second thread for it.
+func TestWatchDefersWhileAConversationStarts(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	ctx := context.Background()
+	h.gw.Poll(ctx)
+	w := h.agents["windmill-maintainer"]
+	w.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		// kagent already lists the task; the bot has not seen an event.
+		w.put(&a2a.Task{ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateWorking, Timestamp: new(time.Now().Add(time.Second))}})
+		h.gw.Poll(ctx)
+		return reply("t1", "ctx-1", "hi"), nil
+	}
+	thread := h.say(h.channel("windmill-maintainer"), ownerID, "go")
+	h.gw.Poll(ctx)
+	for _, c := range h.discord.everCreated() {
+		if strings.Contains(c, originKagentText) {
+			t.Fatalf("duplicate conversation %q", c)
+		}
+	}
+	if got := h.discord.in(thread); len(got) != 1 || got[0].Content != "hi" {
+		t.Fatalf("thread = %+v", got)
 	}
 }

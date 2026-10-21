@@ -123,6 +123,9 @@ func (g *Gateway) surface(ctx context.Context, a *Agent, t *a2a.Task) error {
 // conversationFor returns the conversation of a task's context, opening one
 // in the agent's channel if the bot has never seen it.
 func (g *Gateway) conversationFor(ctx context.Context, a *Agent, t *a2a.Task) (*store.Conversation, error) {
+	bind := g.binding[a.Name]
+	bind.Lock()
+	defer bind.Unlock()
 	conv, ok, err := g.store.ConversationByContext(ctx, a.Name, t.ContextID)
 	if err != nil {
 		return nil, err

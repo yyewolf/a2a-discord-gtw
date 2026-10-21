@@ -51,6 +51,9 @@ type fakeDiscord struct {
 	order    []snowflake.ID
 	threads  map[snowflake.ID]snowflake.ID // thread -> parent channel
 	typing   int
+	// created logs the content of every message ever created, including
+	// ones deleted since.
+	created []string
 	// noCtx counts calls made without request options: every call must
 	// carry its context (rest.WithCtx), or it cannot be cancelled.
 	noCtx int
@@ -156,6 +159,7 @@ func (f *fakeDiscord) CreateMessage(ch snowflake.ID, m discord.MessageCreate, op
 		}
 	}
 	msg := &fakeMessage{ID: f.id(), ChannelID: ch, Content: m.Content, Components: m.Components, Mentions: m.AllowedMentions}
+	f.created = append(f.created, m.Content)
 	f.messages[msg.ID] = msg
 	f.order = append(f.order, msg.ID)
 	return &discord.Message{ID: msg.ID, ChannelID: ch, Content: m.Content}, nil
@@ -243,6 +247,34 @@ func (f *fakeDiscord) RemoveOwnReaction(_, id snowflake.ID, emoji string, opts .
 	return nil
 }
 
+func (f *fakeDiscord) DeleteMessage(ch, id snowflake.ID, opts ...rest.RequestOpt) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.check(opts)
+	msg, ok := f.messages[id]
+	if !ok || msg.ChannelID != ch {
+		return fmt.Errorf("fake: unknown message %s", id)
+	}
+	delete(f.messages, id)
+	f.order = slices.DeleteFunc(f.order, func(m snowflake.ID) bool { return m == id })
+	return nil
+}
+
+func (f *fakeDiscord) DeleteChannel(id snowflake.ID, opts ...rest.RequestOpt) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.check(opts)
+	if _, ok := f.threads[id]; ok {
+		delete(f.threads, id)
+		return nil
+	}
+	if _, ok := f.channels[id]; ok {
+		delete(f.channels, id)
+		return nil
+	}
+	return unknownChannel()
+}
+
 // in returns a copy of the messages of a channel or thread, oldest first.
 func (f *fakeDiscord) in(ch snowflake.ID) []fakeMessage {
 	f.mu.Lock()
@@ -298,18 +330,20 @@ func (a *fakeAgent) Card(context.Context) (*a2a.AgentCard, error) {
 	return &a2a.AgentCard{Description: a.description}, nil
 }
 
+// Stream is lazy like the real client: the message is sent when the stream
+// is first read.
 func (a *fakeAgent) Stream(_ context.Context, m *a2a.Message) iter.Seq2[a2a.Event, error] {
-	a.mu.Lock()
-	a.sent = append(a.sent, m)
-	f := a.onSend
-	a.mu.Unlock()
-	events, err := f(m)
-	for _, ev := range events {
-		if t, ok := ev.(*a2a.Task); ok {
-			a.put(t)
-		}
-	}
 	return func(yield func(a2a.Event, error) bool) {
+		a.mu.Lock()
+		a.sent = append(a.sent, m)
+		f := a.onSend
+		a.mu.Unlock()
+		events, err := f(m)
+		for _, ev := range events {
+			if t, ok := ev.(*a2a.Task); ok {
+				a.put(t)
+			}
+		}
 		for _, ev := range events {
 			if !yield(ev, nil) {
 				return
@@ -454,4 +488,10 @@ func (w testWriter) Write(p []byte) (int, error) {
 	w.t.Helper()
 	w.t.Log(strings.TrimSpace(string(p)))
 	return len(p), nil
+}
+
+func (f *fakeDiscord) everCreated() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.created...)
 }
