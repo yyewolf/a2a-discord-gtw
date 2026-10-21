@@ -93,7 +93,7 @@ func (g *Gateway) HandleInteraction(ctx context.Context, in Interaction) {
 	}
 	unlock := g.conv.lock(snowflake.ID(conv.ThreadID))
 	defer unlock()
-	g.turn(ctx, agent, &conv, true, msg)
+	g.turn(ctx, agent, &conv, msg)
 }
 
 // pending fetches the task and checks the component still belongs to its

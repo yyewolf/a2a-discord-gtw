@@ -289,3 +289,27 @@ func TestShutdownMidStreamPostsNothing(t *testing.T) {
 		}
 	}
 }
+
+// A first turn that fails before kagent names a context leaves a thread a
+// reply can still revive.
+func TestReplyRevivesAThreadWhoseFirstTurnFailed(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	agent := h.agents["claude-assistant"]
+	agent.onSend = func(*a2a.Message) ([]a2a.Event, error) { return nil, errors.New("connection refused") }
+	thread := h.say(h.channel("claude-assistant"), ownerID, "hello")
+
+	agent.onSend = func(m *a2a.Message) ([]a2a.Event, error) {
+		if m.ContextID != "" {
+			t.Errorf("revived turn sent context %q", m.ContextID)
+		}
+		return reply("t1", "ctx-1", "back"), nil
+	}
+	h.say(thread, ownerID, "again")
+	if got := h.discord.in(thread); got[len(got)-1].Content != "back" {
+		t.Fatalf("thread = %+v", got)
+	}
+	if conv, ok, _ := h.store.ConversationByContext(context.Background(), "claude-assistant", "ctx-1"); !ok || conv.ThreadID != uint64(thread) {
+		t.Fatalf("conversation = %+v, %v", conv, ok)
+	}
+}

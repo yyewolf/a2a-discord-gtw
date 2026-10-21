@@ -77,7 +77,7 @@ func (g *Gateway) HandleAsk(ctx context.Context, a Ask, respond func(text string
 		say(fmt.Sprintf("**%s** has no channel yet.", agent.Name))
 		return
 	}
-	conv, err := g.openConversation(ctx, agent, channel, render.Title(a.Prompt), mention(a.UserID))
+	conv, err := g.openConversation(ctx, agent, channel, render.Title(a.Prompt), mention(a.UserID), "")
 	if err != nil {
 		g.log.Error("open conversation", "agent", agent.Name, "err", err)
 		say("⚠️ Could not open a thread: " + err.Error())
@@ -86,7 +86,7 @@ func (g *Gateway) HandleAsk(ctx context.Context, a Ask, respond func(text string
 	say(fmt.Sprintf("Started in <#%d>.", conv.ThreadID))
 	unlock := g.conv.lock(snowflake.ID(conv.ThreadID))
 	defer unlock()
-	g.turn(ctx, agent, conv, false, kagent.TextMessage("", a.Prompt))
+	g.turn(ctx, agent, conv, kagent.TextMessage("", a.Prompt))
 }
 
 // askTarget is the agent named by the option, or else the agent of the
@@ -109,9 +109,10 @@ func (g *Gateway) askTarget(ctx context.Context, a Ask) (*Agent, error) {
 	return nil, fmt.Errorf("outside an agent's channel, pick one with the `%s` option", askAgentOption)
 }
 
-// openConversation posts a status message in the agent's channel and opens a
-// thread on it. The conversation is stored once its context is known.
-func (g *Gateway) openConversation(ctx context.Context, agent *Agent, channel snowflake.ID, title, origin string) (*store.Conversation, error) {
+// openConversation posts a status message in the agent's channel, opens a
+// thread on it and stores the conversation; contextID may be empty until
+// the first turn names it.
+func (g *Gateway) openConversation(ctx context.Context, agent *Agent, channel snowflake.ID, title, origin, contextID string) (*store.Conversation, error) {
 	state := a2a.TaskStateSubmitted
 	status, err := g.discord.CreateMessage(channel, discord.NewMessageCreate().
 		WithContent(render.StatusLine(agent.Name, title, origin, state)).
@@ -123,14 +124,19 @@ func (g *Gateway) openConversation(ctx context.Context, agent *Agent, channel sn
 	if err != nil {
 		return nil, err
 	}
-	return &store.Conversation{
+	conv := &store.Conversation{
 		ThreadID:        uint64(th.ID()),
 		Agent:           agent.Name,
+		ContextID:       contextID,
 		ChannelID:       uint64(channel),
 		StatusMessageID: uint64(status.ID),
 		Title:           title,
 		OwnStatus:       true,
 		State:           string(state),
 		Origin:          origin,
-	}, nil
+	}
+	if err := g.store.PutConversation(ctx, *conv); err != nil {
+		return nil, err
+	}
+	return conv, nil
 }

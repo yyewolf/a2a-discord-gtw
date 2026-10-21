@@ -43,7 +43,7 @@ func (g *Gateway) answerTyped(ctx context.Context, agent *Agent, conv *store.Con
 	if err := g.store.ClearPartials(ctx, string(task.ID)); err != nil {
 		g.log.Warn("clear partial answers", "task", task.ID, "err", err)
 	}
-	g.turn(ctx, agent, conv, true, msg)
+	g.turn(ctx, agent, conv, msg)
 }
 
 // matchChoice maps typed text to a choice, or keeps it as free text.

@@ -30,10 +30,9 @@ const (
 // the thread, keeps the status current, and asks the pending question when
 // the task pauses.
 type relay struct {
-	g         *Gateway
-	agent     *Agent
-	conv      *store.Conversation
-	persisted bool
+	g     *Gateway
+	agent *Agent
+	conv  *store.Conversation
 	// started ends the agent's "starting" mark once the context is known.
 	started func()
 
@@ -49,11 +48,11 @@ type relay struct {
 // conversation has a question pending.
 var errWaiting = errors.New("bot: conversation is waiting for an answer")
 
-// run consumes the event stream of one turn. conv may not be persisted yet
-// (persisted false): it is stored once the stream reveals its context.
-func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, persisted bool, events iter.Seq2[a2a.Event, error]) error {
-	r := &relay{g: g, agent: agent, conv: conv, persisted: persisted, started: func() {}}
-	if !persisted {
+// run consumes the event stream of one turn of a stored conversation. A
+// conversation without a context yet is bound to the one the stream reveals.
+func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, events iter.Seq2[a2a.Event, error]) error {
+	r := &relay{g: g, agent: agent, conv: conv, started: func() {}}
+	if conv.ContextID == "" {
 		r.started = g.beginStart(agent.Name)
 		defer r.started()
 	}
@@ -112,7 +111,7 @@ func (r *relay) consume(ctx context.Context, events iter.Seq2[a2a.Event, error])
 			r.flush(ctx, false)
 		}
 		if r.task != nil {
-			r.g.showState(ctx, r.conv, r.persisted, r.task.Status.State)
+			r.g.showState(ctx, r.conv, r.task.Status.State)
 		}
 	}
 	return nil
@@ -122,12 +121,11 @@ func (r *relay) consume(ctx context.Context, events iter.Seq2[a2a.Event, error])
 // streamed, the first time each is seen.
 func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
 	info := ev.TaskInfo()
-	if !r.persisted && info.ContextID != "" {
-		r.conv.ContextID = info.ContextID
-		if err := r.g.store.PutConversation(ctx, *r.conv); err != nil {
+	if r.conv.ContextID == "" && info.ContextID != "" {
+		if err := r.g.store.SetConversationContext(ctx, r.conv.ThreadID, info.ContextID); err != nil {
 			return err
 		}
-		r.persisted = true
+		r.conv.ContextID = info.ContextID
 		r.started()
 	}
 	if info.TaskID != "" && !slices.Contains(r.seen, info.TaskID) {
@@ -201,7 +199,7 @@ func (r *relay) finish(ctx context.Context, streamErr error) error {
 		r.transcript.Add(&a2a.TaskArtifactUpdateEvent{Artifact: &a2a.Artifact{ID: "final", Parts: a2a.ContentParts{a2a.NewTextPart(kagent.TaskText(full))}}})
 		r.flush(ctx, true)
 	}
-	r.g.showState(ctx, r.conv, r.persisted, full.Status.State)
+	r.g.showState(ctx, r.conv, full.Status.State)
 	return r.g.settle(ctx, r.agent, r.conv, full, len([]rune(kagent.TaskText(full))))
 }
 

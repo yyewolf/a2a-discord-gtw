@@ -116,7 +116,7 @@ func (g *Gateway) surface(ctx context.Context, a *Agent, t *a2a.Task) error {
 			g.post(ctx, snowflake.ID(conv.ThreadID), c)
 		}
 	}
-	g.showState(ctx, conv, true, full.Status.State)
+	g.showState(ctx, conv, full.Status.State)
 	return g.settle(ctx, a, conv, full, len(text))
 }
 
@@ -138,15 +138,7 @@ func (g *Gateway) conversationFor(ctx context.Context, a *Agent, t *a2a.Task) (*
 	if !ok {
 		return nil, fmt.Errorf("%s has no channel", a.Name)
 	}
-	c, err := g.openConversation(ctx, a, channel, taskTitle(t), originKagent)
-	if err != nil {
-		return nil, err
-	}
-	c.ContextID = t.ContextID
-	if err := g.store.PutConversation(ctx, *c); err != nil {
-		return nil, err
-	}
-	return c, nil
+	return g.openConversation(ctx, a, channel, taskTitle(t), originKagent, t.ContextID)
 }
 
 // taskTitle is the first user message of a task, which for a ScheduledRun

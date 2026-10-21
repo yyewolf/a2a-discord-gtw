@@ -63,9 +63,16 @@ func (g *Gateway) startFromMessage(ctx context.Context, agent *Agent, m Message)
 		Title:           title,
 		Origin:          mention(m.AuthorID),
 	}
+	// Stored now, so a reply in the thread finds it even if this first
+	// turn fails before kagent names the context.
+	if err := g.store.PutConversation(ctx, *conv); err != nil {
+		g.log.Error("record conversation", "thread", th.ID(), "err", err)
+		g.post(ctx, th.ID(), "⚠️ Could not record this conversation; replies here will be ignored.")
+		return
+	}
 	unlock := g.conv.lock(th.ID())
 	defer unlock()
-	g.turn(ctx, agent, conv, false, kagent.TextMessage("", m.Content))
+	g.turn(ctx, agent, conv, kagent.TextMessage("", m.Content))
 }
 
 func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message) {
@@ -76,7 +83,7 @@ func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message)
 	}
 	unlock := g.conv.lock(m.ChannelID)
 	defer unlock()
-	err := g.run(ctx, agent, &conv, true, agent.Client.Stream(ctx, kagent.TextMessage(conv.ContextID, m.Content)))
+	err := g.run(ctx, agent, &conv, agent.Client.Stream(ctx, kagent.TextMessage(conv.ContextID, m.Content)))
 	if errors.Is(err, errWaiting) {
 		g.answerTyped(ctx, agent, &conv, m)
 		return
@@ -87,8 +94,8 @@ func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message)
 }
 
 // turn sends a message and relays the reply.
-func (g *Gateway) turn(ctx context.Context, agent *Agent, conv *store.Conversation, persisted bool, msg *a2a.Message) {
-	if err := g.run(ctx, agent, conv, persisted, agent.Client.Stream(ctx, msg)); err != nil {
+func (g *Gateway) turn(ctx context.Context, agent *Agent, conv *store.Conversation, msg *a2a.Message) {
+	if err := g.run(ctx, agent, conv, agent.Client.Stream(ctx, msg)); err != nil {
 		g.log.Warn("turn ended with an error", "agent", agent.Name, "thread", conv.ThreadID, "err", err)
 	}
 }

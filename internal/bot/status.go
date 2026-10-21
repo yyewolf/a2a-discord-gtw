@@ -15,7 +15,7 @@ import (
 // showState updates a conversation's status: its status line when the status
 // message is the bot's, a reaction on the user's message otherwise. Failures
 // are logged, not returned: the status is cosmetic and must not stop a reply.
-func (g *Gateway) showState(ctx context.Context, conv *store.Conversation, persisted bool, state a2a.TaskState) {
+func (g *Gateway) showState(ctx context.Context, conv *store.Conversation, state a2a.TaskState) {
 	if conv.State == string(state) {
 		return
 	}
@@ -38,9 +38,7 @@ func (g *Gateway) showState(ctx context.Context, conv *store.Conversation, persi
 		}
 	}
 	conv.State = string(state)
-	if persisted {
-		if err := g.store.SetConversationState(ctx, conv.ThreadID, conv.State); err != nil {
-			g.log.Warn("record conversation state", "thread", conv.ThreadID, "err", err)
-		}
+	if err := g.store.SetConversationState(ctx, conv.ThreadID, conv.State); err != nil {
+		g.log.Warn("record conversation state", "thread", conv.ThreadID, "err", err)
 	}
 }
