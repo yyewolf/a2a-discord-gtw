@@ -16,3 +16,9 @@ WARNING: persistence is disabled. The state database lives in an emptyDir and
 is lost on every restart: existing threads stop being followed and watched
 tasks may be posted again. Set persistence.enabled=true to keep it.
 {{- end }}
+{{- if .Values.networkPolicy.enabled }}
+
+A CiliumNetworkPolicy restricts egress to DNS, kagent's controller
+({{ .Values.networkPolicy.kagent.namespace }}, port {{ .Values.networkPolicy.kagent.port }}) and Discord. If a policy in
+{{ .Values.networkPolicy.kagent.namespace }} restricts ingress, it must also admit pods from {{ .Release.Namespace }}.
+{{- end }}

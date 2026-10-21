@@ -1,0 +1,58 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "a2a-discord-gtw.fullname" . }}
+  labels:
+    {{- include "a2a-discord-gtw.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "a2a-discord-gtw.selectorLabels" . | nindent 6 }}
+  ingress:
+    # The kubelet's liveness and readiness probes.
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: {{ .Values.healthPort | quote }}
+              protocol: TCP
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    # DNS through Cilium's proxy, which feeds the toFQDNs rule below.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ $np.dns.namespace }}
+            {{- toYaml $np.dns.podLabels | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # kagent's A2A gateway.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ $np.kagent.namespace }}
+            {{- toYaml $np.kagent.podLabels | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: {{ $np.kagent.port | quote }}
+              protocol: TCP
+    # Discord: REST API, gateway websocket and its resume hosts, attachments.
+    - toFQDNs:
+        {{- toYaml $np.discordFQDNs | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

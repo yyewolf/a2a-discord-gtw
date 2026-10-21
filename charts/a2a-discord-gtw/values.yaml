@@ -188,3 +188,40 @@ tolerations: []
 affinity: {}
 # -- Priority class name.
 priorityClassName: ""
+
+networkPolicy:
+  # -- Create a CiliumNetworkPolicy (needs Cilium) that allows only what the
+  # gateway uses: DNS, kagent's controller and Discord out, and the kubelet's
+  # probes in. Note that kagent's own namespace must also admit this pod if a
+  # policy there restricts ingress.
+  enabled: false
+  dns:
+    # -- Namespace of the cluster DNS.
+    namespace: kube-system
+    # -- Labels of the cluster DNS pods. Lookups go through Cilium's DNS proxy
+    # (L7 visibility), which is what makes the toFQDNs rule below work. If
+    # another policy selecting this pod allows DNS without that inspection,
+    # lookups can bypass it and the Discord rule silently matches nothing.
+    podLabels:
+      k8s-app: kube-dns
+  kagent:
+    # -- Namespace of kagent's controller.
+    namespace: kagent
+    # -- Labels of kagent's controller pods. The rule matches pods, not the
+    # Service, since Cilium evaluates policy on the backend pod.
+    podLabels:
+      app.kubernetes.io/component: controller
+    # -- Port of the controller's A2A gateway.
+    port: 8083
+  # -- Discord hosts the gateway reaches on 443: the REST API, the gateway
+  # websocket and its resume hosts, and attachments. Each entry is a Cilium
+  # FQDN selector (matchName or matchPattern).
+  discordFQDNs:
+    - matchName: discord.com
+    - matchName: gateway.discord.gg
+    - matchPattern: "*.discord.gg"
+    - matchName: cdn.discordapp.com
+  # -- Extra ingress rules, appended as-is (Cilium rule syntax).
+  extraIngress: []
+  # -- Extra egress rules, appended as-is (Cilium rule syntax).
+  extraEgress: []
