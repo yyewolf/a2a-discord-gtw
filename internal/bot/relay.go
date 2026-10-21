@@ -52,6 +52,10 @@ type relay struct {
 // conversation has a question pending.
 var errWaiting = errors.New("bot: conversation is waiting for an answer")
 
+// errIdle ends a stream that stayed silent too long. The task goes on in
+// kagent and is followed up by polling.
+var errIdle = errors.New("bot: no event from the agent for too long")
+
 // run consumes the event stream of one turn of a stored conversation. A
 // conversation without a context yet is bound to the one the stream reveals.
 func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, msg *a2a.Message) error {
@@ -124,17 +128,22 @@ func (r *relay) consume(ctx context.Context, msg *a2a.Message) error {
 	flushTimer := time.NewTimer(time.Hour)
 	flushTimer.Stop()
 	defer flushTimer.Stop()
+	idle := time.NewTimer(r.g.idle)
+	defer idle.Stop()
 	first := true
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-idle.C:
+			return errIdle
 		case <-flushTimer.C:
 			r.flush(ctx, false)
 		case it, ok := <-items:
 			if !ok {
 				return nil
 			}
+			idle.Reset(r.g.idle)
 			if it.err != nil {
 				if first && kagent.IsWaitingForInput(it.err) {
 					return errWaiting
@@ -271,6 +280,10 @@ func (r *relay) finish(ctx context.Context, streamErr error) error {
 			r.g.streaming.remove(id)
 		}
 	}()
+	if errors.Is(streamErr, errIdle) {
+		r.g.post(ctx, snowflake.ID(r.conv.ThreadID), fmt.Sprintf("⏳ **%s** has been quiet for %s; I will post the result here when it is done.", r.agent.Name, r.g.idle))
+		return nil
+	}
 	if streamErr != nil {
 		// On shutdown the stream ends because ctx did; nothing was lost,
 		// and nothing can be posted any more.

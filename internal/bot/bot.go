@@ -43,7 +43,12 @@ type Options struct {
 	// present.
 	Agents map[string]AgentClient
 	Logger *slog.Logger
+	// StreamIdleTimeout ends a turn's stream after this long without an
+	// event; the task is then followed up by polling. Default 5 minutes.
+	StreamIdleTimeout time.Duration
 }
+
+const defaultStreamIdleTimeout = 5 * time.Minute
 
 // Gateway connects Discord to kagent.
 type Gateway struct {
@@ -57,6 +62,7 @@ type Gateway struct {
 	notify   []snowflake.ID
 	agents   map[string]*Agent
 	order    []string
+	idle     time.Duration
 
 	mu        sync.RWMutex
 	byChannel map[snowflake.ID]string // agent channel -> agent name
@@ -93,6 +99,10 @@ func New(o Options) (*Gateway, error) {
 	}
 	if g.log == nil {
 		g.log = slog.New(slog.DiscardHandler)
+	}
+	g.idle = o.StreamIdleTimeout
+	if g.idle <= 0 {
+		g.idle = defaultStreamIdleTimeout
 	}
 	var err error
 	if g.guild, err = parseID(o.Config.Discord.GuildID); err != nil {

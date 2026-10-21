@@ -440,3 +440,34 @@ func TestThrottledTextShowsWhileTheAgentIsQuiet(t *testing.T) {
 	close(finish)
 	wg.Wait()
 }
+
+// A stream silent for too long is dropped; the result still reaches the
+// thread through the follow-up.
+func TestIdleStreamIsHandedToTheFollowUp(t *testing.T) {
+	h := newHarnessWith(t, []func(*bot.Options){func(o *bot.Options) { o.StreamIdleTimeout = 200 * time.Millisecond }})
+	h.ensure()
+	agent := h.agents["claude-assistant"]
+	agent.onStream = func(ctx context.Context, _ *a2a.Message) iter.Seq2[a2a.Event, error] {
+		return func(yield func(a2a.Event, error) bool) {
+			working := &a2a.Task{ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateWorking}}
+			agent.put(working)
+			if !yield(working, nil) {
+				return
+			}
+			<-ctx.Done() // a stream that never says anything again
+		}
+	}
+	thread := h.say(h.channel("claude-assistant"), ownerID, "long job")
+	got := h.discord.in(thread)
+	if len(got) != 1 || !strings.Contains(got[0].Content, "has been quiet") {
+		t.Fatalf("thread = %+v", got)
+	}
+	agent.put(&a2a.Task{
+		ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		Artifacts: []*a2a.Artifact{{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("Job done.")}}},
+	})
+	h.gw.Poll(context.Background())
+	if got := h.discord.in(thread); got[len(got)-1].Content != "Job done." {
+		t.Fatalf("thread = %+v", got)
+	}
+}

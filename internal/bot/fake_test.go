@@ -436,9 +436,15 @@ type harness struct {
 	store   *store.Store
 	agents  map[string]*fakeAgent
 	cfg     *config.File
+	options []func(*bot.Options)
 }
 
 func newHarness(t *testing.T, mutate ...func(*config.File)) *harness {
+	return newHarnessWith(t, nil, mutate...)
+}
+
+// newHarnessWith also adjusts the gateway's options.
+func newHarnessWith(t *testing.T, options []func(*bot.Options), mutate ...func(*config.File)) *harness {
 	t.Helper()
 	cfg := &config.File{
 		Discord: config.Discord{
@@ -460,7 +466,7 @@ func newHarness(t *testing.T, mutate ...func(*config.File)) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	h := &harness{t: t, discord: newFakeDiscord(), store: st, agents: map[string]*fakeAgent{}, cfg: cfg}
+	h := &harness{t: t, discord: newFakeDiscord(), store: st, agents: map[string]*fakeAgent{}, cfg: cfg, options: options}
 	clients := map[string]bot.AgentClient{}
 	for _, a := range cfg.Agents {
 		fa := newFakeAgent("The " + a.Name + " agent.")
@@ -474,7 +480,11 @@ func newHarness(t *testing.T, mutate ...func(*config.File)) *harness {
 			t.Errorf("%d Discord calls without a context", h.discord.noCtx)
 		}
 	})
-	h.gw, err = bot.New(bot.Options{Config: cfg, Store: st, Discord: h.discord, Agents: clients, Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil))})
+	opts := bot.Options{Config: cfg, Store: st, Discord: h.discord, Agents: clients, Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
+	for _, o := range h.options {
+		o(&opts)
+	}
+	h.gw, err = bot.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
