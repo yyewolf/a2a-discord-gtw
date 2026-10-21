@@ -30,8 +30,18 @@ func (g *Gateway) answerTyped(ctx context.Context, agent *Agent, conv *store.Con
 		return
 	}
 	req, err := kagent.PendingRequest(task)
-	if err != nil || req.IsApproval() || len(req.Questions) != 1 {
-		g.post(ctx, thread, "↑ Answer the pending request with its buttons first.")
+	if err != nil {
+		g.post(ctx, thread, fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, err))
+		return
+	}
+	if req.IsApproval() || len(req.Questions) != 1 {
+		// Not answerable by text. Post the buttons again here: the earlier
+		// ones may be far up, or may never have been posted if the turn
+		// that asked was cut.
+		g.post(ctx, thread, "This needs the buttons:")
+		if err := g.ask(ctx, agent, conv, task, req); err != nil {
+			g.log.Error("post request", "task", task.ID, "err", err)
+		}
 		return
 	}
 	answer := matchChoice(req.Questions[0], m.Content)

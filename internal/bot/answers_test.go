@@ -256,3 +256,18 @@ func TestToolApprovals(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedReplyToAnApprovalPostsTheButtons(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	thread, msgs := pausedOn(t, h, map[string]any{"type": "tool_approval_request", "tools": []any{
+		map[string]any{"id": "tool-1", "name": "delete_file"},
+	}})
+	h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) { return nil, errWaiting }
+	h.say(thread, ownerID, "yes go ahead")
+	got := h.discord.in(thread)
+	last := got[len(got)-1]
+	if len(got) != len(msgs)+3 || len(last.Components) == 0 || !strings.Contains(last.Content, "wants to run") {
+		t.Fatalf("thread = %+v", got)
+	}
+}
