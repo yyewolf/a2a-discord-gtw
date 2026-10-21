@@ -1,0 +1,135 @@
+package bot
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
+	"github.com/yyewolf/a2a-discord-gtw/internal/render"
+	"github.com/yyewolf/a2a-discord-gtw/internal/store"
+)
+
+// AskCommand is the name of the slash command.
+const AskCommand = "ask"
+
+const (
+	askAgentOption  = "agent"
+	askPromptOption = "prompt"
+)
+
+// Commands are the guild slash commands the gateway serves.
+func (g *Gateway) Commands() []discord.ApplicationCommandCreate {
+	choices := make([]discord.ApplicationCommandOptionChoiceString, 0, len(g.order))
+	for _, name := range g.order {
+		choices = append(choices, discord.ApplicationCommandOptionChoiceString{Name: name, Value: name})
+	}
+	return []discord.ApplicationCommandCreate{discord.SlashCommandCreate{
+		Name:        AskCommand,
+		Description: "Start a conversation with an agent",
+		Options: []discord.ApplicationCommandOption{
+			discord.ApplicationCommandOptionString{
+				Name: askPromptOption, Description: "What to ask", Required: true,
+			},
+			discord.ApplicationCommandOptionString{
+				Name: askAgentOption, Description: "Which agent (defaults to this channel's)", Choices: choices,
+			},
+		},
+		Contexts: []discord.InteractionContextType{discord.InteractionContextTypeGuild},
+	}}
+}
+
+// Ask is a use of /ask.
+type Ask struct {
+	UserID    snowflake.ID
+	ChannelID snowflake.ID
+	// Agent is the agent option, empty when not given.
+	Agent  string
+	Prompt string
+}
+
+// HandleAsk starts a conversation from /ask: a status message in the agent's
+// channel, a thread on it, and the prompt sent to the agent. respond answers
+// the command (ephemerally) as soon as the thread exists; HandleAsk returns
+// when the agent's turn is over.
+func (g *Gateway) HandleAsk(ctx context.Context, a Ask, respond func(text string) error) {
+	say := func(text string) {
+		if err := respond(text); err != nil {
+			g.log.Warn("respond to /ask", "err", err)
+		}
+	}
+	if !g.Allowed(a.UserID) {
+		say("Only the agents' owners can talk to them.")
+		return
+	}
+	agent, err := g.askTarget(ctx, a)
+	if err != nil {
+		say(err.Error())
+		return
+	}
+	channel, ok := g.channelOf(agent.Name)
+	if !ok {
+		say(fmt.Sprintf("**%s** has no channel yet.", agent.Name))
+		return
+	}
+	conv, err := g.openConversation(agent, channel, render.Title(a.Prompt), mention(a.UserID))
+	if err != nil {
+		g.log.Error("open conversation", "agent", agent.Name, "err", err)
+		say("⚠️ Could not open a thread: " + err.Error())
+		return
+	}
+	say(fmt.Sprintf("Started in <#%d>.", conv.ThreadID))
+	unlock := g.conv.lock(snowflake.ID(conv.ThreadID))
+	defer unlock()
+	g.turn(ctx, agent, conv, false, kagent.TextMessage("", a.Prompt))
+}
+
+// askTarget is the agent named by the option, or else the agent of the
+// channel (or conversation thread) the command was used in.
+func (g *Gateway) askTarget(ctx context.Context, a Ask) (*Agent, error) {
+	if name := strings.TrimSpace(a.Agent); name != "" {
+		if agent, ok := g.agents[name]; ok {
+			return agent, nil
+		}
+		return nil, fmt.Errorf("there is no agent called **%s**", name)
+	}
+	if agent, ok := g.agentForChannel(a.ChannelID); ok {
+		return agent, nil
+	}
+	if conv, ok, err := g.store.ConversationByThread(ctx, uint64(a.ChannelID)); err == nil && ok {
+		if agent, ok := g.agents[conv.Agent]; ok {
+			return agent, nil
+		}
+	}
+	return nil, fmt.Errorf("outside an agent's channel, pick one with the `%s` option", askAgentOption)
+}
+
+// openConversation posts a status message in the agent's channel and opens a
+// thread on it. The conversation is stored once its context is known.
+func (g *Gateway) openConversation(agent *Agent, channel snowflake.ID, title, origin string) (*store.Conversation, error) {
+	state := a2a.TaskStateSubmitted
+	status, err := g.discord.CreateMessage(channel, discord.NewMessageCreate().
+		WithContent(render.StatusLine(agent.Name, title, origin, state)).
+		WithAllowedMentions(&discord.AllowedMentions{}))
+	if err != nil {
+		return nil, err
+	}
+	th, err := g.discord.CreateThreadFromMessage(channel, status.ID, discord.ThreadCreateFromMessage{Name: render.ThreadName(title)})
+	if err != nil {
+		return nil, err
+	}
+	return &store.Conversation{
+		ThreadID:        uint64(th.ID()),
+		Agent:           agent.Name,
+		ChannelID:       uint64(channel),
+		StatusMessageID: uint64(status.ID),
+		Title:           title,
+		OwnStatus:       true,
+		State:           string(state),
+		Origin:          origin,
+	}, nil
+}
