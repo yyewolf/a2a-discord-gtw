@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -387,7 +389,7 @@ func newHarness(t *testing.T, mutate ...func(*config.File)) *harness {
 		h.agents[a.Name] = fa
 		clients[a.Name] = fa
 	}
-	h.gw, err = bot.New(bot.Options{Config: cfg, Store: st, Discord: h.discord, Agents: clients})
+	h.gw, err = bot.New(bot.Options{Config: cfg, Store: st, Discord: h.discord, Agents: clients, Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,4 +410,13 @@ func (h *harness) channel(agent string) snowflake.ID {
 		h.t.Fatalf("no channel for %s", agent)
 	}
 	return ch.ID()
+}
+
+// testWriter sends the gateway's logs to the test log.
+type testWriter struct{ t *testing.T }
+
+func (w testWriter) Write(p []byte) (int, error) {
+	w.t.Helper()
+	w.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
 }
