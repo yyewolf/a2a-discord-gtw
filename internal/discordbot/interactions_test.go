@@ -3,8 +3,11 @@ package discordbot
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
@@ -77,3 +80,49 @@ func TestHandlerPanicIsContained(t *testing.T) {
 type panicky struct{ Handler }
 
 func (panicky) HandleMessage(context.Context, bot.Message) { panic("boom") }
+
+func TestCloseWaitsForHandlersFirst(t *testing.T) {
+	cases := []struct {
+		name string
+		// stuck: the handler never returns on its own.
+		stuck bool
+	}{
+		{name: "handler finishes"},
+		{name: "handler stuck", stuck: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var order []string
+			note := func(s string) {
+				mu.Lock()
+				defer mu.Unlock()
+				order = append(order, s)
+			}
+			release := make(chan struct{})
+			b := &Bot{log: slog.New(slog.DiscardHandler), closeClient: func(context.Context) { note("client closed") }}
+			b.run(func() {
+				if c.stuck {
+					<-release
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+				note("handler done")
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			b.Close(ctx)
+			close(release)
+			b.work.Wait()
+			want := []string{"handler done", "client closed"}
+			if c.stuck {
+				want = []string{"client closed"}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !slices.Equal(order, want) {
+				t.Fatalf("order = %v, want %v", order, want)
+			}
+		})
+	}
+}

@@ -86,11 +86,22 @@ func (b *Bot) Ready(context.Context) error {
 	return nil
 }
 
-// Close disconnects, then waits for the events being handled; their context
-// should be cancelled first so they stop promptly.
+// Close waits for the events being handled, for as long as ctx allows, and
+// only then closes the client. The other order deadlocks: DisGo's closed
+// rate limiter holds every bucket, so a handler still posting would block
+// for good.
 func (b *Bot) Close(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		b.work.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		b.log.Warn("closing Discord with event handlers still running")
+	}
 	b.closeClient(ctx)
-	b.work.Wait()
 }
 
 // run handles one event in the background.
