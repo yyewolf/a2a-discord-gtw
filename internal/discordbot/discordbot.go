@@ -28,6 +28,7 @@ type Handler interface {
 	HandleMessage(ctx context.Context, m bot.Message)
 	HandleInteraction(ctx context.Context, in bot.Interaction)
 	HandleAsk(ctx context.Context, a bot.Ask, respond func(text string) error)
+	HandleChannelChange(ctx context.Context, channel snowflake.ID)
 	Commands() []discord.ApplicationCommandCreate
 }
 
@@ -140,6 +141,14 @@ func (b *Bot) listeners(ctx context.Context, h Handler) []disgobot.EventListener
 		}),
 		disgobot.NewListenerFunc(func(e *events.ApplicationCommandInteractionCreate) {
 			b.onCommand(ctx, h, e)
+		}),
+		// An agent channel deleted or moved out of the category is
+		// replaced; IntentGuilds delivers these.
+		disgobot.NewListenerFunc(func(e *events.GuildChannelUpdate) {
+			b.run(func() { h.HandleChannelChange(ctx, e.ChannelID) })
+		}),
+		disgobot.NewListenerFunc(func(e *events.GuildChannelDelete) {
+			b.run(func() { h.HandleChannelChange(ctx, e.ChannelID) })
 		}),
 	}
 }
