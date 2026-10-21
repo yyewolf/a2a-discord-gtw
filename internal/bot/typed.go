@@ -23,21 +23,21 @@ func (g *Gateway) answerTyped(ctx context.Context, agent *Agent, conv *store.Con
 	case errors.Is(err, kagent.ErrNoRequest):
 		// kagent refused the turn, yet nothing waits for input: another
 		// task of the conversation is still running.
-		g.post(thread, fmt.Sprintf("⏳ **%s** is still working on something in this conversation; try again when it is done.", agent.Name))
+		g.post(ctx, thread, fmt.Sprintf("⏳ **%s** is still working on something in this conversation; try again when it is done.", agent.Name))
 		return
 	case err != nil:
-		g.post(thread, fmt.Sprintf("⚠️ Could not reach **%s**: %v", agent.Name, err))
+		g.post(ctx, thread, fmt.Sprintf("⚠️ Could not reach **%s**: %v", agent.Name, err))
 		return
 	}
 	req, err := kagent.PendingRequest(task)
 	if err != nil || req.IsApproval() || len(req.Questions) != 1 {
-		g.post(thread, "↑ Answer the pending request with its buttons first.")
+		g.post(ctx, thread, "↑ Answer the pending request with its buttons first.")
 		return
 	}
 	answer := matchChoice(req.Questions[0], m.Content)
 	msg, err := kagent.AnswerMessage(task, req, [][]string{answer}, m.Content)
 	if err != nil {
-		g.post(thread, fmt.Sprintf("⚠️ %v", err))
+		g.post(ctx, thread, fmt.Sprintf("⚠️ %v", err))
 		return
 	}
 	if err := g.store.ClearPartials(ctx, string(task.ID)); err != nil {

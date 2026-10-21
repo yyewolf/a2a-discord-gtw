@@ -113,7 +113,7 @@ func (g *Gateway) surface(ctx context.Context, a *Agent, t *a2a.Task) error {
 	text := []rune(kagent.TaskText(full))
 	if rec.PostedLen < len(text) {
 		for _, c := range render.Chunk(string(text[rec.PostedLen:]), render.MessageLimit) {
-			g.post(snowflake.ID(conv.ThreadID), c)
+			g.post(ctx, snowflake.ID(conv.ThreadID), c)
 		}
 	}
 	g.showState(ctx, conv, true, full.Status.State)
@@ -138,7 +138,7 @@ func (g *Gateway) conversationFor(ctx context.Context, a *Agent, t *a2a.Task) (*
 	if !ok {
 		return nil, fmt.Errorf("%s has no channel", a.Name)
 	}
-	c, err := g.openConversation(a, channel, taskTitle(t), originKagent)
+	c, err := g.openConversation(ctx, a, channel, taskTitle(t), originKagent)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/render"
@@ -23,16 +24,16 @@ func (g *Gateway) showState(ctx context.Context, conv *store.Conversation, persi
 	if conv.OwnStatus {
 		content := render.StatusLine(conv.Agent, conv.Title, conv.Origin, state)
 		upd := discord.NewMessageUpdate().WithContent(content).WithAllowedMentions(&discord.AllowedMentions{})
-		if _, err := g.discord.UpdateMessage(ch, msg, upd); err != nil {
+		if _, err := g.discord.UpdateMessage(ch, msg, upd, rest.WithCtx(ctx)); err != nil {
 			g.log.Warn("update status line", "thread", conv.ThreadID, "err", err)
 		}
 	} else {
 		if conv.State != "" && render.StateMark(prev) != render.StateMark(state) {
-			if err := g.discord.RemoveOwnReaction(ch, msg, render.StateMark(prev)); err != nil {
+			if err := g.discord.RemoveOwnReaction(ch, msg, render.StateMark(prev), rest.WithCtx(ctx)); err != nil {
 				g.log.Warn("remove status reaction", "thread", conv.ThreadID, "err", err)
 			}
 		}
-		if err := g.discord.AddReaction(ch, msg, render.StateMark(state)); err != nil {
+		if err := g.discord.AddReaction(ch, msg, render.StateMark(state), rest.WithCtx(ctx)); err != nil {
 			g.log.Warn("add status reaction", "thread", conv.ThreadID, "err", err)
 		}
 	}

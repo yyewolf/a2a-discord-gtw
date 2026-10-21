@@ -8,6 +8,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
@@ -49,7 +50,7 @@ func (g *Gateway) HandleMessage(ctx context.Context, m Message) {
 
 func (g *Gateway) startFromMessage(ctx context.Context, agent *Agent, m Message) {
 	title := render.Title(m.Content)
-	th, err := g.discord.CreateThreadFromMessage(m.ChannelID, m.ID, discord.ThreadCreateFromMessage{Name: render.ThreadName(title)})
+	th, err := g.discord.CreateThreadFromMessage(m.ChannelID, m.ID, discord.ThreadCreateFromMessage{Name: render.ThreadName(title)}, rest.WithCtx(ctx))
 	if err != nil {
 		g.log.Error("open thread", "channel", m.ChannelID, "message", m.ID, "err", err)
 		return
@@ -70,7 +71,7 @@ func (g *Gateway) startFromMessage(ctx context.Context, agent *Agent, m Message)
 func (g *Gateway) reply(ctx context.Context, conv store.Conversation, m Message) {
 	agent, ok := g.agents[conv.Agent]
 	if !ok {
-		g.post(m.ChannelID, fmt.Sprintf("⚠️ **%s** is no longer configured.", conv.Agent))
+		g.post(ctx, m.ChannelID, fmt.Sprintf("⚠️ **%s** is no longer configured.", conv.Agent))
 		return
 	}
 	unlock := g.conv.lock(m.ChannelID)

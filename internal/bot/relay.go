@@ -10,6 +10,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
@@ -76,7 +77,7 @@ func (r *relay) typing(ctx context.Context) {
 	defer t.Stop()
 	for {
 		// Typing failures are harmless; the next tick retries.
-		_ = r.g.discord.SendTyping(snowflake.ID(r.conv.ThreadID))
+		_ = r.g.discord.SendTyping(snowflake.ID(r.conv.ThreadID), rest.WithCtx(ctx))
 		select {
 		case <-ctx.Done():
 			return
@@ -108,7 +109,7 @@ func (r *relay) consume(ctx context.Context, events iter.Seq2[a2a.Event, error])
 			r.task.Status = e.Status
 		case *a2a.TaskArtifactUpdateEvent:
 			r.transcript.Add(e)
-			r.flush(false)
+			r.flush(ctx, false)
 		}
 		if r.task != nil {
 			r.g.showState(ctx, r.conv, r.persisted, r.task.Status.State)
@@ -138,7 +139,7 @@ func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
 
 // flush brings the thread's reply messages in line with the transcript,
 // throttled unless final.
-func (r *relay) flush(final bool) {
+func (r *relay) flush(ctx context.Context, final bool) {
 	if !final && time.Since(r.lastEdit) < editInterval {
 		return
 	}
@@ -150,12 +151,12 @@ func (r *relay) flush(final bool) {
 			continue
 		case i < len(r.msgs):
 			upd := discord.NewMessageUpdate().WithContent(c).WithAllowedMentions(&discord.AllowedMentions{})
-			if _, err := r.g.discord.UpdateMessage(thread, r.msgs[i], upd); err != nil {
+			if _, err := r.g.discord.UpdateMessage(thread, r.msgs[i], upd, rest.WithCtx(ctx)); err != nil {
 				r.g.log.Warn("edit reply", "thread", thread, "err", err)
 				continue
 			}
 		default:
-			m, err := r.g.discord.CreateMessage(thread, discord.NewMessageCreate().WithContent(c).WithAllowedMentions(&discord.AllowedMentions{}))
+			m, err := r.g.discord.CreateMessage(thread, discord.NewMessageCreate().WithContent(c).WithAllowedMentions(&discord.AllowedMentions{}), rest.WithCtx(ctx))
 			if err != nil {
 				r.g.log.Warn("post reply", "thread", thread, "err", err)
 				return
@@ -171,14 +172,14 @@ func (r *relay) flush(final bool) {
 // finish posts the rest of the reply, reports a failure, and asks the
 // pending question if the task paused.
 func (r *relay) finish(ctx context.Context, streamErr error) error {
-	r.flush(true)
+	r.flush(ctx, true)
 	defer func() {
 		for _, id := range r.seen {
 			r.g.streaming.remove(id)
 		}
 	}()
 	if streamErr != nil {
-		r.g.post(snowflake.ID(r.conv.ThreadID), fmt.Sprintf("⚠️ Lost the connection to **%s**: %v", r.agent.Name, streamErr))
+		r.g.post(ctx, snowflake.ID(r.conv.ThreadID), fmt.Sprintf("⚠️ Lost the connection to **%s**: %v", r.agent.Name, streamErr))
 		return streamErr
 	}
 	if r.task == nil {
@@ -194,7 +195,7 @@ func (r *relay) finish(ctx context.Context, streamErr error) error {
 	if r.transcript.Text() == "" && full.Status.State != a2a.TaskStateInputRequired {
 		// Nothing streamed: show the stored reply, or the failure reason.
 		r.transcript.Add(&a2a.TaskArtifactUpdateEvent{Artifact: &a2a.Artifact{ID: "final", Parts: a2a.ContentParts{a2a.NewTextPart(kagent.TaskText(full))}}})
-		r.flush(true)
+		r.flush(ctx, true)
 	}
 	r.g.showState(ctx, r.conv, r.persisted, full.Status.State)
 	return r.g.settle(ctx, r.agent, r.conv, full, len([]rune(kagent.TaskText(full))))
@@ -215,13 +216,13 @@ func (g *Gateway) settle(ctx context.Context, agent *Agent, conv *store.Conversa
 			rec.RequestKey = req.Key()
 		}
 	} else if !errors.Is(err, kagent.ErrNoRequest) {
-		g.post(snowflake.ID(conv.ThreadID), fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, err))
+		g.post(ctx, snowflake.ID(conv.ThreadID), fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, err))
 	}
 	return g.store.PutTask(ctx, rec)
 }
 
 // ask posts a pending request in the conversation's thread.
-func (g *Gateway) ask(_ context.Context, agent *Agent, conv *store.Conversation, t *a2a.Task, req *kagent.Request) {
+func (g *Gateway) ask(ctx context.Context, agent *Agent, conv *store.Conversation, t *a2a.Task, req *kagent.Request) {
 	thread := snowflake.ID(conv.ThreadID)
 	var msgs []discord.MessageCreate
 	if req.IsApproval() {
@@ -230,16 +231,16 @@ func (g *Gateway) ask(_ context.Context, agent *Agent, conv *store.Conversation,
 		msgs = render.QuestionMessages(agent.Name, string(t.ID), req, g.notify)
 	}
 	for _, m := range msgs {
-		if _, err := g.discord.CreateMessage(thread, m); err != nil {
+		if _, err := g.discord.CreateMessage(thread, m, rest.WithCtx(ctx)); err != nil {
 			g.log.Error("post question", "thread", thread, "task", t.ID, "err", err)
 		}
 	}
 }
 
 // post sends a plain notice; failures are logged.
-func (g *Gateway) post(ch snowflake.ID, text string) {
+func (g *Gateway) post(ctx context.Context, ch snowflake.ID, text string) {
 	m := discord.NewMessageCreate().WithContent(render.Truncate(text, render.MessageLimit)).WithAllowedMentions(&discord.AllowedMentions{})
-	if _, err := g.discord.CreateMessage(ch, m); err != nil {
+	if _, err := g.discord.CreateMessage(ch, m, rest.WithCtx(ctx)); err != nil {
 		g.log.Warn("post notice", "channel", ch, "err", err)
 	}
 }

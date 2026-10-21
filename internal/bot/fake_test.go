@@ -51,6 +51,21 @@ type fakeDiscord struct {
 	order    []snowflake.ID
 	threads  map[snowflake.ID]snowflake.ID // thread -> parent channel
 	typing   int
+	// noCtx counts calls made without request options: every call must
+	// carry its context (rest.WithCtx), or it cannot be cancelled.
+	noCtx int
+}
+
+func (f *fakeDiscord) check(opts []rest.RequestOpt) {
+	if len(opts) == 0 {
+		f.noCtx++
+	}
+}
+
+func (f *fakeDiscord) checkLocked(opts []rest.RequestOpt) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.check(opts)
 }
 
 func newFakeDiscord() *fakeDiscord {
@@ -92,18 +107,20 @@ func (f *fakeDiscord) addTextChannel(name string, parent snowflake.ID, topic str
 	return id
 }
 
-func (f *fakeDiscord) GetChannel(id snowflake.ID, _ ...rest.RequestOpt) (discord.Channel, error) {
+func (f *fakeDiscord) GetChannel(id snowflake.ID, opts ...rest.RequestOpt) (discord.Channel, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	if ch, ok := f.channels[id]; ok {
 		return ch, nil
 	}
 	return nil, unknownChannel()
 }
 
-func (f *fakeDiscord) GetGuildChannels(snowflake.ID, ...rest.RequestOpt) ([]discord.GuildChannel, error) {
+func (f *fakeDiscord) GetGuildChannels(_ snowflake.ID, opts ...rest.RequestOpt) ([]discord.GuildChannel, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	var out []discord.GuildChannel
 	for _, ch := range f.channels {
 		out = append(out, ch)
@@ -111,7 +128,8 @@ func (f *fakeDiscord) GetGuildChannels(snowflake.ID, ...rest.RequestOpt) ([]disc
 	return out, nil
 }
 
-func (f *fakeDiscord) CreateGuildChannel(_ snowflake.ID, c discord.GuildChannelCreate, _ ...rest.RequestOpt) (discord.GuildChannel, error) {
+func (f *fakeDiscord) CreateGuildChannel(_ snowflake.ID, c discord.GuildChannelCreate, opts ...rest.RequestOpt) (discord.GuildChannel, error) {
+	f.checkLocked(opts)
 	tc, ok := c.(discord.GuildTextChannelCreate)
 	if !ok {
 		return nil, fmt.Errorf("fake: unsupported channel create %T", c)
@@ -128,9 +146,10 @@ func (f *fakeDiscord) deleteChannel(id snowflake.ID) {
 	delete(f.channels, id)
 }
 
-func (f *fakeDiscord) CreateMessage(ch snowflake.ID, m discord.MessageCreate, _ ...rest.RequestOpt) (*discord.Message, error) {
+func (f *fakeDiscord) CreateMessage(ch snowflake.ID, m discord.MessageCreate, opts ...rest.RequestOpt) (*discord.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	if _, ok := f.channels[ch]; !ok {
 		if _, ok := f.threads[ch]; !ok {
 			return nil, unknownChannel()
@@ -153,9 +172,10 @@ func (f *fakeDiscord) userMessage(ch snowflake.ID, content string) snowflake.ID 
 	return msg.ID
 }
 
-func (f *fakeDiscord) UpdateMessage(ch, id snowflake.ID, u discord.MessageUpdate, _ ...rest.RequestOpt) (*discord.Message, error) {
+func (f *fakeDiscord) UpdateMessage(ch, id snowflake.ID, u discord.MessageUpdate, opts ...rest.RequestOpt) (*discord.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	msg, ok := f.messages[id]
 	if !ok || msg.ChannelID != ch {
 		return nil, fmt.Errorf("fake: unknown message %s", id)
@@ -169,9 +189,10 @@ func (f *fakeDiscord) UpdateMessage(ch, id snowflake.ID, u discord.MessageUpdate
 	return &discord.Message{ID: id, ChannelID: ch, Content: msg.Content}, nil
 }
 
-func (f *fakeDiscord) CreateThreadFromMessage(ch, msgID snowflake.ID, t discord.ThreadCreateFromMessage, _ ...rest.RequestOpt) (*discord.GuildThread, error) {
+func (f *fakeDiscord) CreateThreadFromMessage(ch, msgID snowflake.ID, t discord.ThreadCreateFromMessage, opts ...rest.RequestOpt) (*discord.GuildThread, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	if _, ok := f.messages[msgID]; !ok {
 		return nil, fmt.Errorf("fake: unknown message %s", msgID)
 	}
@@ -188,16 +209,18 @@ func (f *fakeDiscord) CreateThreadFromMessage(ch, msgID snowflake.ID, t discord.
 	return &th, nil
 }
 
-func (f *fakeDiscord) SendTyping(snowflake.ID, ...rest.RequestOpt) error {
+func (f *fakeDiscord) SendTyping(_ snowflake.ID, opts ...rest.RequestOpt) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	f.typing++
 	return nil
 }
 
-func (f *fakeDiscord) AddReaction(_, id snowflake.ID, emoji string, _ ...rest.RequestOpt) error {
+func (f *fakeDiscord) AddReaction(_, id snowflake.ID, emoji string, opts ...rest.RequestOpt) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	msg, ok := f.messages[id]
 	if !ok {
 		return fmt.Errorf("fake: unknown message %s", id)
@@ -208,9 +231,10 @@ func (f *fakeDiscord) AddReaction(_, id snowflake.ID, emoji string, _ ...rest.Re
 	return nil
 }
 
-func (f *fakeDiscord) RemoveOwnReaction(_, id snowflake.ID, emoji string, _ ...rest.RequestOpt) error {
+func (f *fakeDiscord) RemoveOwnReaction(_, id snowflake.ID, emoji string, opts ...rest.RequestOpt) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.check(opts)
 	msg, ok := f.messages[id]
 	if !ok {
 		return fmt.Errorf("fake: unknown message %s", id)
@@ -393,6 +417,13 @@ func newHarness(t *testing.T, mutate ...func(*config.File)) *harness {
 		h.agents[a.Name] = fa
 		clients[a.Name] = fa
 	}
+	t.Cleanup(func() {
+		h.discord.mu.Lock()
+		defer h.discord.mu.Unlock()
+		if h.discord.noCtx > 0 {
+			t.Errorf("%d Discord calls without a context", h.discord.noCtx)
+		}
+	})
 	h.gw, err = bot.New(bot.Options{Config: cfg, Store: st, Discord: h.discord, Agents: clients, Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil))})
 	if err != nil {
 		t.Fatal(err)

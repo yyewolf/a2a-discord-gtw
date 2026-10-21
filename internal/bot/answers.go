@@ -9,6 +9,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
@@ -81,10 +82,10 @@ func (g *Gateway) HandleInteraction(ctx context.Context, in Interaction) {
 		return
 	}
 	if !done {
-		g.markAnswered(in, summary, "waiting for the other answers")
+		g.markAnswered(ctx, in, summary, "waiting for the other answers")
 		return
 	}
-	g.markAnswered(in, summary, "")
+	g.markAnswered(ctx, in, summary, "")
 	conv, ok, err := g.store.ConversationByContext(ctx, agent.Name, task.ContextID)
 	if err != nil || !ok {
 		g.log.Error("conversation of an answered task", "task", task.ID, "err", err)
@@ -105,7 +106,7 @@ func (g *Gateway) pending(ctx context.Context, agent *Agent, id render.ID, in In
 	}
 	req, err := kagent.PendingRequest(task)
 	if err != nil || !id.Matches(req.Key()) {
-		g.markAnswered(in, "no longer pending", "")
+		g.markAnswered(ctx, in, "no longer pending", "")
 		return nil, nil, false
 	}
 	return task, req, true
@@ -248,12 +249,12 @@ func (g *Gateway) collect(ctx context.Context, task *a2a.Task, req *kagent.Reque
 }
 
 // markAnswered replaces a request message's components with what was chosen.
-func (g *Gateway) markAnswered(in Interaction, summary, note string) {
+func (g *Gateway) markAnswered(ctx context.Context, in Interaction, summary, note string) {
 	m, ok := in.Message()
 	if !ok {
 		return
 	}
-	if _, err := g.discord.UpdateMessage(m.ChannelID, m.ID, render.Answered(m.Content, summary, in.UserID(), note)); err != nil {
+	if _, err := g.discord.UpdateMessage(m.ChannelID, m.ID, render.Answered(m.Content, summary, in.UserID(), note), rest.WithCtx(ctx)); err != nil {
 		g.log.Warn("mark request answered", "message", m.ID, "err", err)
 	}
 }

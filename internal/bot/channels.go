@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/render"
@@ -38,7 +39,7 @@ func (g *Gateway) ensureChannel(ctx context.Context, a *Agent, existing *[]disco
 		return 0, err
 	}
 	if ok {
-		_, err := g.discord.GetChannel(snowflake.ID(stored))
+		_, err := g.discord.GetChannel(snowflake.ID(stored), rest.WithCtx(ctx))
 		switch {
 		case err == nil:
 			return snowflake.ID(stored), nil
@@ -48,7 +49,7 @@ func (g *Gateway) ensureChannel(ctx context.Context, a *Agent, existing *[]disco
 		g.log.Info("agent channel was deleted, recreating it", "agent", a.Name, "channel", stored)
 	} else {
 		if !*listed {
-			if *existing, err = g.discord.GetGuildChannels(g.guild); err != nil {
+			if *existing, err = g.discord.GetGuildChannels(g.guild, rest.WithCtx(ctx)); err != nil {
 				return 0, fmt.Errorf("bot: list guild channels: %w", err)
 			}
 			*listed = true
@@ -71,7 +72,7 @@ func (g *Gateway) ensureChannel(ctx context.Context, a *Agent, existing *[]disco
 		Name:     a.Name,
 		Topic:    topic,
 		ParentID: g.category,
-	})
+	}, rest.WithCtx(ctx))
 	if err != nil {
 		return 0, fmt.Errorf("bot: create channel for %s: %w", a.Name, err)
 	}

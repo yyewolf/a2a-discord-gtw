@@ -7,6 +7,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
@@ -76,7 +77,7 @@ func (g *Gateway) HandleAsk(ctx context.Context, a Ask, respond func(text string
 		say(fmt.Sprintf("**%s** has no channel yet.", agent.Name))
 		return
 	}
-	conv, err := g.openConversation(agent, channel, render.Title(a.Prompt), mention(a.UserID))
+	conv, err := g.openConversation(ctx, agent, channel, render.Title(a.Prompt), mention(a.UserID))
 	if err != nil {
 		g.log.Error("open conversation", "agent", agent.Name, "err", err)
 		say("⚠️ Could not open a thread: " + err.Error())
@@ -110,15 +111,15 @@ func (g *Gateway) askTarget(ctx context.Context, a Ask) (*Agent, error) {
 
 // openConversation posts a status message in the agent's channel and opens a
 // thread on it. The conversation is stored once its context is known.
-func (g *Gateway) openConversation(agent *Agent, channel snowflake.ID, title, origin string) (*store.Conversation, error) {
+func (g *Gateway) openConversation(ctx context.Context, agent *Agent, channel snowflake.ID, title, origin string) (*store.Conversation, error) {
 	state := a2a.TaskStateSubmitted
 	status, err := g.discord.CreateMessage(channel, discord.NewMessageCreate().
 		WithContent(render.StatusLine(agent.Name, title, origin, state)).
-		WithAllowedMentions(&discord.AllowedMentions{}))
+		WithAllowedMentions(&discord.AllowedMentions{}), rest.WithCtx(ctx))
 	if err != nil {
 		return nil, err
 	}
-	th, err := g.discord.CreateThreadFromMessage(channel, status.ID, discord.ThreadCreateFromMessage{Name: render.ThreadName(title)})
+	th, err := g.discord.CreateThreadFromMessage(channel, status.ID, discord.ThreadCreateFromMessage{Name: render.ThreadName(title)}, rest.WithCtx(ctx))
 	if err != nil {
 		return nil, err
 	}
