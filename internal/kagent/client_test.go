@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -168,5 +169,24 @@ func TestCardSizeIsBounded(t *testing.T) {
 	srv.Card.Description = strings.Repeat("x", 2<<20)
 	if _, err := newAgent(t, srv).Card(context.Background()); err == nil {
 		t.Fatal("a 2 MiB agent card was accepted")
+	}
+}
+
+func TestTasksSinceFollowsPages(t *testing.T) {
+	srv := kagenttest.New()
+	defer srv.Close()
+	for i := range 250 {
+		srv.PutTask(&a2a.Task{ID: a2a.TaskID(fmt.Sprintf("t%03d", i)), ContextID: "c", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted}})
+	}
+	tasks, err := newAgent(t, srv).TasksSince(context.Background(), time.Now().Add(-time.Minute))
+	if err != nil || len(tasks) != 250 {
+		t.Fatalf("%d tasks, %v", len(tasks), err)
+	}
+	seen := map[a2a.TaskID]bool{}
+	for _, tk := range tasks {
+		if seen[tk.ID] {
+			t.Fatalf("%s listed twice", tk.ID)
+		}
+		seen[tk.ID] = true
 	}
 }

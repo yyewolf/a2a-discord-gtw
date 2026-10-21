@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -182,10 +183,22 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			if p.ContextID != "" && t.ContextID != p.ContextID {
 				continue
 			}
+			if p.Status != "" && t.Status.State != p.Status {
+				continue
+			}
 			out = append(out, t)
 		}
 		s.mu.Unlock()
-		writeResult(w, req.ID, a2a.ListTasksResponse{Tasks: out, TotalSize: len(out), PageSize: len(out)})
+		total := len(out)
+		// The page token is the offset of the next page.
+		offset, _ := strconv.Atoi(p.PageToken)
+		out = out[min(offset, len(out)):]
+		next := ""
+		if p.PageSize > 0 && len(out) > p.PageSize {
+			out = out[:p.PageSize]
+			next = strconv.Itoa(offset + p.PageSize)
+		}
+		writeResult(w, req.ID, a2a.ListTasksResponse{Tasks: out, TotalSize: total, PageSize: len(out), NextPageToken: next})
 	case "CancelTask":
 		var p a2a.CancelTaskRequest
 		_ = json.Unmarshal(req.Params, &p)
