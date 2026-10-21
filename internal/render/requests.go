@@ -162,9 +162,13 @@ func RejectModal(id ID, what string) discord.ModalCreate {
 }
 
 // Answered is a request message after it was answered: the same text, no
-// components, and a line saying what was chosen and by whom.
-func Answered(content, summary string, by snowflake.ID) discord.MessageUpdate {
+// components, and a line saying what was chosen, by whom, and an optional
+// note.
+func Answered(content, summary string, by snowflake.ID, note string) discord.MessageUpdate {
 	line := fmt.Sprintf("\n-# ↳ %s by <@%s>", summary, by)
+	if note != "" {
+		line += " — " + note
+	}
 	content = Truncate(content, MessageLimit-len([]rune(line))) + line
 	return discord.NewMessageUpdate().
 		WithContent(content).

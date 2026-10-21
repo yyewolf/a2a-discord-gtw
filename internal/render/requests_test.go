@@ -121,11 +121,15 @@ func TestApprovalMessage(t *testing.T) {
 }
 
 func TestAnswered(t *testing.T) {
-	u := render.Answered("question", "**Blue**", owner)
+	u := render.Answered("question", "**Blue**", owner, "")
 	if u.Content == nil || *u.Content != "question\n-# ↳ **Blue** by <@111111111111111111>" {
 		t.Fatalf("content = %v", u.Content)
 	}
 	if u.Components == nil || len(*u.Components) != 0 {
 		t.Fatalf("components = %v", u.Components)
+	}
+	u = render.Answered("question", "**a**", owner, "waiting for the other answers")
+	if !strings.HasSuffix(*u.Content, "by <@111111111111111111> — waiting for the other answers") {
+		t.Fatalf("content = %q", *u.Content)
 	}
 }
