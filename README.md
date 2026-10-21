@@ -135,8 +135,9 @@ The image is `FROM scratch`, runs as UID/GID 65532 and only writes to
 `/data`. `GET /healthz` answers while the process runs; `GET /readyz` also
 checks the Discord connection, the database, that every agent answers in
 kagent, and that every agent has its channel (naming the ones that do not,
-and why). On SIGTERM the bot stops taking work, lets the turns in flight wind
-down for up to ten seconds, then disconnects; a second signal exits at once.
+and why). On SIGTERM the bot cancels the turns in flight (their tasks go on in
+kagent and are followed up after the restart), waits up to ten seconds for
+them to stop, then disconnects; a second signal exits at once.
 
 In Kubernetes, run one replica (two would both answer every message) next to
 kagent, mount the configuration from a ConfigMap and the token from a Secret,
