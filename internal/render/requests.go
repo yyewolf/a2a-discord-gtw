@@ -66,7 +66,7 @@ func QuestionMessages(agent, taskID string, req *kagent.Request, notify []snowfl
 
 func questionRows(taskID, key string, qi int, q kagent.Question) [][]discord.InteractiveComponent {
 	id := func(kind Kind, arg int) string {
-		return ID{Kind: kind, Task: taskID, Key: key, Index: qi, Arg: arg}.String()
+		return ID{Kind: kind, Task: taskID, Key: ShortKey(key), Index: qi, Arg: arg}.String()
 	}
 	var rows [][]discord.InteractiveComponent
 	if len(q.Choices) > 0 && (q.Multiple || len(q.Choices) > maxButtonRows*buttonsPerRow) {
@@ -128,7 +128,7 @@ func ApprovalMessage(agent, taskID string, req *kagent.Request, notify []snowfla
 		WithContent(Truncate(strings.TrimSpace(b.String()), MessageLimit)).
 		WithAllowedMentions(allowed)
 	id := func(kind Kind, i int) string {
-		return ID{Kind: kind, Task: taskID, Key: req.Key(), Index: i}.String()
+		return ID{Kind: kind, Task: taskID, Key: ShortKey(req.Key()), Index: i}.String()
 	}
 	if len(req.Tools) <= maxButtonRows {
 		for i, tc := range req.Tools {

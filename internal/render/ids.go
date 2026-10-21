@@ -1,6 +1,8 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -26,8 +28,8 @@ const idPrefix = "adg"
 
 // ID is the state carried in a component's custom ID. Discord gives it back
 // on every interaction, so nothing needs to be kept in memory between the
-// question and the click. Key is a prefix of the request key: a click on a
-// question that has since been replaced is detected and refused.
+// question and the click. Key is the ShortKey of the request key: a click on
+// a question that has since been replaced is detected and refused.
 type ID struct {
 	Kind  Kind
 	Task  string
@@ -36,21 +38,21 @@ type ID struct {
 	Arg   int
 }
 
-const keyLen = 8
+// keyLen characters of base64url(sha256(key)): 72 bits, so two requests'
+// keys never collide in practice, even when they share a long prefix as
+// Anthropic tool IDs (toolu_01…) do.
+const keyLen = 12
 
 // String encodes the ID; it stays well under Discord's 100-character limit
 // for a UUID task ID.
 func (id ID) String() string {
-	return strings.Join([]string{idPrefix, string(id.Kind), id.Task, ShortKey(id.Key), strconv.Itoa(id.Index), strconv.Itoa(id.Arg)}, ":")
+	return strings.Join([]string{idPrefix, string(id.Kind), id.Task, id.Key, strconv.Itoa(id.Index), strconv.Itoa(id.Arg)}, ":")
 }
 
-// ShortKey is the part of a request key carried in custom IDs.
+// ShortKey is the digest of a request key carried in custom IDs.
 func ShortKey(key string) string {
-	key = strings.ReplaceAll(key, ":", "")
-	if len(key) > keyLen {
-		key = key[:keyLen]
-	}
-	return key
+	sum := sha256.Sum256([]byte(key))
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:keyLen]
 }
 
 // ParseID decodes a custom ID made by ID.String.

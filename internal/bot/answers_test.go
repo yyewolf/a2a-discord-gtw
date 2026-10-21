@@ -146,14 +146,14 @@ func TestAnswerRefusals(t *testing.T) {
 		{
 			name: "stale request", user: ownerID,
 			customID: func([]fakeMessage) string {
-				return render.ID{Kind: render.KindChoice, Task: "t1", Key: "old-request"}.String()
+				return render.ID{Kind: render.KindChoice, Task: "t1", Key: render.ShortKey("old-request")}.String()
 			},
 			marked: "no longer pending",
 		},
 		{
 			name: "unknown task", user: ownerID,
 			customID: func([]fakeMessage) string {
-				return render.ID{Kind: render.KindChoice, Task: "nope", Key: "req-1"}.String()
+				return render.ID{Kind: render.KindChoice, Task: "nope", Key: render.ShortKey("req-1")}.String()
 			},
 			ephemeral: "do not know this task",
 		},
@@ -225,8 +225,8 @@ func TestToolApprovals(t *testing.T) {
 		{
 			name: "one by one",
 			steps: func(t *testing.T, h *harness, m fakeMessage) {
-				h.gw.HandleInteraction(context.Background(), &fakeInteraction{user: ownerID, customID: render.ID{Kind: render.KindApprove, Task: "t1", Key: "tool-1", Index: 0}.String(), msg: on(m)})
-				open := &fakeInteraction{user: ownerID, customID: render.ID{Kind: render.KindReject, Task: "t1", Key: "tool-1", Index: 1}.String(), msg: on(m)}
+				h.gw.HandleInteraction(context.Background(), &fakeInteraction{user: ownerID, customID: render.ID{Kind: render.KindApprove, Task: "t1", Key: render.ShortKey("tool-1"), Index: 0}.String(), msg: on(m)})
+				open := &fakeInteraction{user: ownerID, customID: render.ID{Kind: render.KindReject, Task: "t1", Key: render.ShortKey("tool-1"), Index: 1}.String(), msg: on(m)}
 				h.gw.HandleInteraction(context.Background(), open)
 				if open.modal == nil {
 					t.Fatal("no rejection modal")
