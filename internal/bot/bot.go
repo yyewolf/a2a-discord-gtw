@@ -71,11 +71,6 @@ type Gateway struct {
 	// one, so it waits.
 	startingMu sync.Mutex
 	starting   map[string]int
-
-	// Work started by an event but outliving it (a relay after a button
-	// press) runs under runCtx and is waited for by Run.
-	runCtx context.Context
-	work   sync.WaitGroup
 }
 
 // New builds a Gateway. Call EnsureChannels before handling events.
@@ -180,27 +175,6 @@ func (k *keyedMutex) lock(key snowflake.ID) func() {
 	k.mu.Unlock()
 	m.Lock()
 	return m.Unlock
-}
-
-// Run owns the gateway's background work: it blocks until ctx is done, then
-// waits for work started with spawn to finish.
-func (g *Gateway) Run(ctx context.Context) {
-	g.mu.Lock()
-	g.runCtx = ctx
-	g.mu.Unlock()
-	<-ctx.Done()
-	g.work.Wait()
-}
-
-// spawn runs f in the background under Run's context, so it is cancelled on
-// shutdown and Run waits for it. Before Run starts, f gets ctx.
-func (g *Gateway) spawn(ctx context.Context, f func(ctx context.Context)) {
-	g.mu.RLock()
-	if g.runCtx != nil {
-		ctx = g.runCtx
-	}
-	g.mu.RUnlock()
-	g.work.Go(func() { f(ctx) })
 }
 
 // beginStart marks a relay of agent as not yet bound to a context; the
