@@ -69,7 +69,16 @@ func TestServeNeedsToken(t *testing.T) {
 }
 
 func TestRejectsBadLogLevel(t *testing.T) {
-	if _, err := run(t, "healthcheck", "--log-level", "loud"); err == nil {
-		t.Fatal("expected an error")
+	if _, err := run(t, "serve", "--log-level", "loud"); err == nil || !strings.Contains(err.Error(), "log level") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestHealthcheckIgnoresOtherSettings(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if _, err := run(t, "healthcheck", "--listen", ":"+port, "--log-level", "loud", "--data-dir", ""); err != nil {
+		t.Fatalf("err = %v", err)
 	}
 }

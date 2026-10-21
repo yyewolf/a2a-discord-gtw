@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -46,8 +45,9 @@ func NewRootCmd() *cobra.Command {
 
 // Execute runs the CLI and returns the process exit code.
 func Execute(ctx context.Context) int {
-	if err := NewRootCmd().ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+	root := NewRootCmd()
+	if err := root.ExecuteContext(ctx); err != nil {
+		_, _ = fmt.Fprintln(root.ErrOrStderr(), "error:", err) // nothing left to report a failed write to
 		return 1
 	}
 	return 0

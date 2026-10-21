@@ -27,6 +27,9 @@ func newHealthcheckCmd(e *env) *cobra.Command {
 		Use:   "healthcheck",
 		Short: "Exit non-zero unless the local server is healthy (for container HEALTHCHECK)",
 		Args:  cobra.NoArgs,
+		// Only the listen address matters here; a probe must not fail on
+		// settings the server itself already accepted or ignores.
+		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
 			defer cancel()
