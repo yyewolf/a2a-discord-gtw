@@ -90,6 +90,14 @@ func migrations() []string {
 		 SELECT thread_id, agent, NULLIF(context_id, ''), channel_id, status_message_id, title, created_at, own_status, state, origin FROM conversations`,
 		`DROP TABLE conversations`,
 		`ALTER TABLE conversations_v2 RENAME TO conversations`,
+		// 13: the messages carrying a pending request's buttons, so they
+		// can be disabled however the request ends.
+		`CREATE TABLE request_messages (
+			task_id    TEXT    NOT NULL,
+			channel_id INTEGER NOT NULL,
+			message_id INTEGER NOT NULL,
+			PRIMARY KEY (task_id, message_id)
+		)`,
 	}
 }
 
