@@ -1,0 +1,235 @@
+package bot
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"iter"
+	"time"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/yyewolf/a2a-discord-gtw/internal/kagent"
+	"github.com/yyewolf/a2a-discord-gtw/internal/render"
+	"github.com/yyewolf/a2a-discord-gtw/internal/store"
+)
+
+const (
+	// editInterval spaces out edits of a streaming reply; Discord allows
+	// about five edits per five seconds per channel.
+	editInterval = 1500 * time.Millisecond
+	// typingInterval renews the typing indicator, which lasts ten seconds.
+	typingInterval = 8 * time.Second
+)
+
+// relay follows one turn of a conversation: it streams the agent's reply into
+// the thread, keeps the status current, and asks the pending question when
+// the task pauses.
+type relay struct {
+	g         *Gateway
+	agent     *Agent
+	conv      *store.Conversation
+	persisted bool
+
+	task       *a2a.Task
+	transcript kagent.Transcript
+	msgs       []snowflake.ID
+	posted     []string
+	lastEdit   time.Time
+}
+
+// errWaiting is returned by run when kagent refused the turn because the
+// conversation has a question pending.
+var errWaiting = errors.New("bot: conversation is waiting for an answer")
+
+// run consumes the event stream of one turn. conv may not be persisted yet
+// (persisted false): it is stored once the stream reveals its context.
+func (g *Gateway) run(ctx context.Context, agent *Agent, conv *store.Conversation, persisted bool, events iter.Seq2[a2a.Event, error]) error {
+	r := &relay{g: g, agent: agent, conv: conv, persisted: persisted}
+	typingCtx, stopTyping := context.WithCancel(ctx)
+	typing := make(chan struct{})
+	go func() {
+		defer close(typing)
+		r.typing(typingCtx)
+	}()
+	err := r.consume(ctx, events)
+	stopTyping()
+	<-typing
+	if errors.Is(err, errWaiting) {
+		return err
+	}
+	return r.finish(ctx, err)
+}
+
+func (r *relay) typing(ctx context.Context) {
+	t := time.NewTicker(typingInterval)
+	defer t.Stop()
+	for {
+		// Typing failures are harmless; the next tick retries.
+		_ = r.g.discord.SendTyping(snowflake.ID(r.conv.ThreadID))
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (r *relay) consume(ctx context.Context, events iter.Seq2[a2a.Event, error]) error {
+	first := true
+	for ev, err := range events {
+		if err != nil {
+			if first && kagent.IsWaitingForInput(err) {
+				return errWaiting
+			}
+			return err
+		}
+		first = false
+		if err := r.observe(ctx, ev); err != nil {
+			return err
+		}
+		switch e := ev.(type) {
+		case *a2a.Task:
+			r.task = e
+		case *a2a.TaskStatusUpdateEvent:
+			if r.task == nil {
+				r.task = &a2a.Task{ID: e.TaskID, ContextID: e.ContextID}
+			}
+			r.task.Status = e.Status
+		case *a2a.TaskArtifactUpdateEvent:
+			r.transcript.Add(e)
+			r.flush(false)
+		}
+		if r.task != nil {
+			r.g.showState(ctx, r.conv, r.persisted, r.task.Status.State)
+		}
+	}
+	return nil
+}
+
+// observe binds the conversation to its context and marks the task as
+// streamed, the first time each is seen.
+func (r *relay) observe(ctx context.Context, ev a2a.Event) error {
+	info := ev.TaskInfo()
+	if !r.persisted && info.ContextID != "" {
+		r.conv.ContextID = info.ContextID
+		if err := r.g.store.PutConversation(ctx, *r.conv); err != nil {
+			return err
+		}
+		r.persisted = true
+	}
+	if info.TaskID != "" && (r.task == nil || r.task.ID != info.TaskID) {
+		r.g.streaming.Store(info.TaskID, true)
+	}
+	return nil
+}
+
+// flush brings the thread's reply messages in line with the transcript,
+// throttled unless final.
+func (r *relay) flush(final bool) {
+	if !final && time.Since(r.lastEdit) < editInterval {
+		return
+	}
+	chunks := render.Chunk(r.transcript.Text(), render.MessageLimit)
+	thread := snowflake.ID(r.conv.ThreadID)
+	for i, c := range chunks {
+		switch {
+		case i < len(r.msgs) && r.posted[i] == c:
+			continue
+		case i < len(r.msgs):
+			upd := discord.NewMessageUpdate().WithContent(c).WithAllowedMentions(&discord.AllowedMentions{})
+			if _, err := r.g.discord.UpdateMessage(thread, r.msgs[i], upd); err != nil {
+				r.g.log.Warn("edit reply", "thread", thread, "err", err)
+				continue
+			}
+		default:
+			m, err := r.g.discord.CreateMessage(thread, discord.NewMessageCreate().WithContent(c).WithAllowedMentions(&discord.AllowedMentions{}))
+			if err != nil {
+				r.g.log.Warn("post reply", "thread", thread, "err", err)
+				return
+			}
+			r.msgs = append(r.msgs, m.ID)
+			r.posted = append(r.posted, "")
+		}
+		r.posted[i] = c
+	}
+	r.lastEdit = time.Now()
+}
+
+// finish posts the rest of the reply, reports a failure, and asks the
+// pending question if the task paused.
+func (r *relay) finish(ctx context.Context, streamErr error) error {
+	r.flush(true)
+	defer func() {
+		if r.task != nil {
+			r.g.streaming.Delete(r.task.ID)
+		}
+	}()
+	if streamErr != nil {
+		r.g.post(snowflake.ID(r.conv.ThreadID), fmt.Sprintf("⚠️ Lost the connection to **%s**: %v", r.agent.Name, streamErr))
+		return streamErr
+	}
+	if r.task == nil {
+		return errors.New("bot: the agent returned no task")
+	}
+	// The stream's last task may lack artifacts or the request payload;
+	// kagent's stored task is authoritative.
+	full, err := r.agent.Client.Task(ctx, r.task.ID)
+	if err != nil {
+		r.g.log.Warn("read final task", "task", r.task.ID, "err", err)
+		full = r.task
+	}
+	if r.transcript.Text() == "" && full.Status.State != a2a.TaskStateInputRequired {
+		// Nothing streamed: show the stored reply, or the failure reason.
+		r.transcript.Add(&a2a.TaskArtifactUpdateEvent{Artifact: &a2a.Artifact{ID: "final", Parts: a2a.ContentParts{a2a.NewTextPart(kagent.TaskText(full))}}})
+		r.flush(true)
+	}
+	r.g.showState(ctx, r.conv, r.persisted, full.Status.State)
+	return r.g.settle(ctx, r.agent, r.conv, full, len([]rune(kagent.TaskText(full))))
+}
+
+// settle records what has been shown for a task and, if it waits for input,
+// asks for it once.
+func (g *Gateway) settle(ctx context.Context, agent *Agent, conv *store.Conversation, t *a2a.Task, postedLen int) error {
+	rec, _, err := g.store.Task(ctx, string(t.ID))
+	if err != nil {
+		return err
+	}
+	rec.TaskID, rec.Agent, rec.ContextID = string(t.ID), agent.Name, t.ContextID
+	rec.State, rec.PostedLen = string(t.Status.State), postedLen
+	if req, err := kagent.PendingRequest(t); err == nil {
+		if rec.RequestKey != req.Key() {
+			g.ask(ctx, agent, conv, t, req)
+			rec.RequestKey = req.Key()
+		}
+	} else if !errors.Is(err, kagent.ErrNoRequest) {
+		g.post(snowflake.ID(conv.ThreadID), fmt.Sprintf("⚠️ **%s** is waiting for input I cannot show: %v", agent.Name, err))
+	}
+	return g.store.PutTask(ctx, rec)
+}
+
+// ask posts a pending request in the conversation's thread.
+func (g *Gateway) ask(_ context.Context, agent *Agent, conv *store.Conversation, t *a2a.Task, req *kagent.Request) {
+	thread := snowflake.ID(conv.ThreadID)
+	var msgs []discord.MessageCreate
+	if req.IsApproval() {
+		msgs = []discord.MessageCreate{render.ApprovalMessage(agent.Name, string(t.ID), req, g.notify)}
+	} else {
+		msgs = render.QuestionMessages(agent.Name, string(t.ID), req, g.notify)
+	}
+	for _, m := range msgs {
+		if _, err := g.discord.CreateMessage(thread, m); err != nil {
+			g.log.Error("post question", "thread", thread, "task", t.ID, "err", err)
+		}
+	}
+}
+
+// post sends a plain notice; failures are logged.
+func (g *Gateway) post(ch snowflake.ID, text string) {
+	m := discord.NewMessageCreate().WithContent(render.Truncate(text, render.MessageLimit)).WithAllowedMentions(&discord.AllowedMentions{})
+	if _, err := g.discord.CreateMessage(ch, m); err != nil {
+		g.log.Warn("post notice", "channel", ch, "err", err)
+	}
+}
