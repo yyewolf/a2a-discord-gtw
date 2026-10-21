@@ -1,8 +1,9 @@
 # a2a-discord-gtw — design
 
 A Discord bot that is the phone-side front end for a personal set of
-[kagent](https://github.com/kagent-dev/kagent) agents. One Discord channel (the
-hub) carries every agent; each conversation is a thread.
+[kagent](https://github.com/kagent-dev/kagent) agents. One Discord category
+holds a text channel per agent; each conversation is a thread in its agent's
+channel.
 
 ## Why
 
@@ -24,11 +25,11 @@ Existing bridges were tried and rejected:
 ## Goals
 
 1. When an agent produces something — including tasks the bot did not start,
-   such as kagent ScheduledRuns — it shows up in the hub channel.
+   such as kagent ScheduledRuns — it shows up in that agent's channel.
 2. Replying in a thread continues that conversation in kagent.
 3. Agent questions (ask-user) and tool approvals can be answered from Discord,
    with buttons where possible, and the agent resumes immediately.
-4. Several agents share one channel.
+4. Several agents live side by side, one channel each, in one category.
 5. The owner is pinged (a real Discord notification) when an agent needs input.
 
 ## Non-goals
@@ -74,7 +75,7 @@ Existing bridges were tried and rejected:
 ```yaml
 discord:
   guild_id: "1027556538560282765"
-  channel_id: "1562536811325300746"   # the hub
+  category_id: "1562536781361188945"  # one text channel per agent inside it
   allowed_user_ids: ["<owner id>"]     # everyone else is ignored
   notify_user_ids: ["<owner id>"]      # pinged when input is needed (defaults to allowed)
 kagent:
@@ -86,16 +87,25 @@ agents:
   - name: windmill-maintainer
     ref: kagent/windmill-maintainer
     watch: true                        # surface tasks the bot did not start
-default_agent: claude-assistant        # for plain messages in the hub
 ```
 
 Env: `ADG_DISCORD_TOKEN` (required), `ADG_CONFIG` (path), `ADG_DATA_DIR`,
 `ADG_LISTEN` (health endpoint), `ADG_LOG_LEVEL`.
 
+### Agent channels
+
+Every configured agent has its own text channel inside `category_id`, named
+after the agent (`windmill-maintainer`). The bot creates it when missing, with
+the agent's description from its agent card as the channel topic. The
+agent → channel ID mapping is persisted, so a channel renamed by hand is reused
+rather than duplicated; if the stored channel was deleted, it is recreated.
+Channels outside the category are ignored. The bot needs Manage Channels on the
+category.
+
 ### Threads
 
-The hub channel holds one top-level message per conversation; the thread on it
-is the conversation. A thread maps to exactly one `(agent, contextId)`, stored
+An agent's channel holds one top-level message per conversation; the thread on
+it is the conversation. A thread maps to exactly one `(agent, contextId)`, stored
 in SQLite. Every task in that context belongs to the thread.
 
 The top-level message is the conversation's status line, edited as state
@@ -105,11 +115,12 @@ canceled.
 
 ### Starting a conversation from Discord
 
+- A plain message in an agent's channel (not in a thread) starts a
+  conversation with that agent, threaded on the user's own message.
 - `/ask agent:<choice> prompt:<text>` — choices are the configured agents.
-  The bot posts the status message, opens a thread on it, and sends the prompt.
-- A plain message in the hub (not in a thread) starts a conversation with
-  `default_agent`, threaded on the user's own message. Without a
-  `default_agent`, the bot replies with a hint to use `/ask`.
+  Inside an agent's channel `agent` is optional and defaults to that channel's
+  agent; elsewhere it is required. The bot posts the status message in the
+  agent's channel, opens a thread on it, and sends the prompt.
 
 ### Replies in a thread
 
@@ -128,8 +139,8 @@ while the task is working.
 
 For each agent with `watch: true`, the bot polls kagent's A2A `ListTasks`
 every 15–30 seconds for tasks updated since its watermark. A task in a context
-the bot does not know gets a new status message and thread, then is treated like
-any other. State changes post into the thread: the final text when it
+the bot does not know gets a new status message and thread in the agent's
+channel, then is treated like any other. State changes post into the thread: the final text when it
 completes, the error when it fails, the question when it needs input.
 
 The watermark is persisted. On first start it is "now", so history is not
