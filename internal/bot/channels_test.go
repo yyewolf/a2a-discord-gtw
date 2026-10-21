@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/yyewolf/a2a-discord-gtw/internal/bot"
 )
@@ -130,5 +131,50 @@ func TestMissingChannelRetriedOnDemand(t *testing.T) {
 	}
 	if err := h.gw.ChannelsReady(context.Background()); err != nil {
 		t.Fatalf("still not ready: %v", err)
+	}
+}
+
+func TestChannelChangesAtRuntime(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(h *harness, ch snowflake.ID)
+		// event: Discord told the bot (otherwise it finds out on its own).
+		event bool
+	}{
+		{"deleted, found on post", func(h *harness, ch snowflake.ID) { h.discord.deleteChannel(ch) }, false},
+		{"deleted, event", func(h *harness, ch snowflake.ID) { h.discord.deleteChannel(ch) }, true},
+		{"moved out, event", func(h *harness, ch snowflake.ID) { h.discord.moveChannel(ch, 999) }, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.ensure()
+			old := h.channel("claude-assistant")
+			c.change(h, old)
+			if c.event {
+				h.gw.HandleChannelChange(context.Background(), old)
+				// Messages in the old channel are no longer the agent's.
+				h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) {
+					t.Error("message in a replaced channel reached the agent")
+					return nil, nil
+				}
+				if c.name == "moved out, event" {
+					h.say(old, ownerID, "hello?")
+				}
+			}
+			h.agents["claude-assistant"].onSend = func(*a2a.Message) ([]a2a.Event, error) { return reply("t1", "ctx-1", "ok"), nil }
+			var replies []string
+			h.gw.HandleAsk(context.Background(), bot.Ask{UserID: ownerID, Agent: "claude-assistant", Prompt: "hi"}, func(s string) error {
+				replies = append(replies, s)
+				return nil
+			})
+			now, _, _ := h.store.AgentChannel(context.Background(), "claude-assistant")
+			if snowflake.ID(now) == old || len(replies) != 1 || !strings.Contains(replies[0], "Started in") {
+				t.Fatalf("channel %d (old %s), replies %q", now, old, replies)
+			}
+			if got := h.discord.in(snowflake.ID(now)); len(got) != 1 {
+				t.Fatalf("new channel holds %+v", got)
+			}
+		})
 	}
 }

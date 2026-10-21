@@ -95,13 +95,7 @@ func (g *Gateway) agentChannel(ctx context.Context, agent string) (snowflake.ID,
 	if ch, ok := g.channelOf(agent); ok {
 		return ch, nil
 	}
-	var existing []discord.GuildChannel
-	listed := false
-	if err := g.ensureAgent(ctx, g.agents[agent], &existing, &listed); err != nil {
-		return 0, err
-	}
-	ch, _ := g.channelOf(agent)
-	return ch, nil
+	return g.reprovision(ctx, g.agents[agent])
 }
 
 // ChannelsReady fails while an agent has no channel, saying why.
@@ -182,4 +176,29 @@ func (g *Gateway) ensureChannel(ctx context.Context, a *Agent, existing *[]disco
 	}
 	g.log.Info("created agent channel", "agent", a.Name, "channel", ch.ID())
 	return ch.ID(), g.store.SetAgentChannel(ctx, a.Name, uint64(ch.ID()))
+}
+
+// reprovision checks an agent's channel again, now, and returns the one it
+// ends up with.
+func (g *Gateway) reprovision(ctx context.Context, a *Agent) (snowflake.ID, error) {
+	var existing []discord.GuildChannel
+	listed := false
+	if err := g.ensureAgent(ctx, a, &existing, &listed); err != nil {
+		return 0, err
+	}
+	ch, _ := g.channelOf(a.Name)
+	return ch, nil
+}
+
+// HandleChannelChange reacts to an agent channel being deleted or edited:
+// one deleted or moved out of the category is replaced. Other channels are
+// ignored.
+func (g *Gateway) HandleChannelChange(ctx context.Context, channel snowflake.ID) {
+	agent, ok := g.agentForChannel(channel)
+	if !ok {
+		return
+	}
+	if _, err := g.reprovision(ctx, agent); err != nil {
+		g.log.Error("agent channel changed and could not be replaced", "agent", agent.Name, "err", err)
+	}
 }

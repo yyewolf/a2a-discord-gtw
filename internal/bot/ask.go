@@ -72,12 +72,7 @@ func (g *Gateway) HandleAsk(ctx context.Context, a Ask, respond func(text string
 		say(err.Error())
 		return
 	}
-	channel, err := g.agentChannel(ctx, agent.Name)
-	if err != nil {
-		say(fmt.Sprintf("⚠️ **%s** has no channel: %v", agent.Name, err))
-		return
-	}
-	conv, err := g.openConversation(ctx, agent, channel, render.Title(a.Prompt), mention(a.UserID), "")
+	conv, err := g.openConversation(ctx, agent, render.Title(a.Prompt), mention(a.UserID), "")
 	if err != nil {
 		g.log.Error("open conversation", "agent", agent.Name, "err", err)
 		say("⚠️ Could not open a thread: " + err.Error())
@@ -111,12 +106,24 @@ func (g *Gateway) askTarget(ctx context.Context, a Ask) (*Agent, error) {
 
 // openConversation posts a status message in the agent's channel, opens a
 // thread on it and stores the conversation; contextID may be empty until
-// the first turn names it.
-func (g *Gateway) openConversation(ctx context.Context, agent *Agent, channel snowflake.ID, title, origin, contextID string) (*store.Conversation, error) {
+// the first turn names it. A channel found deleted is provisioned again and
+// the post retried.
+func (g *Gateway) openConversation(ctx context.Context, agent *Agent, title, origin, contextID string) (*store.Conversation, error) {
 	state := a2a.TaskStateSubmitted
-	status, err := g.discord.CreateMessage(channel, discord.NewMessageCreate().
+	post := discord.NewMessageCreate().
 		WithContent(render.StatusLine(agent.Name, title, origin, state)).
-		WithAllowedMentions(&discord.AllowedMentions{}), rest.WithCtx(ctx))
+		WithAllowedMentions(&discord.AllowedMentions{})
+	channel, err := g.agentChannel(ctx, agent.Name)
+	if err != nil {
+		return nil, err
+	}
+	status, err := g.discord.CreateMessage(channel, post, rest.WithCtx(ctx))
+	if isUnknownChannel(err) {
+		if channel, err = g.reprovision(ctx, agent); err != nil {
+			return nil, err
+		}
+		status, err = g.discord.CreateMessage(channel, post, rest.WithCtx(ctx))
+	}
 	if err != nil {
 		return nil, err
 	}

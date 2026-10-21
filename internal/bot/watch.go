@@ -185,11 +185,7 @@ func (g *Gateway) conversationFor(ctx context.Context, a *Agent, t *a2a.Task) (*
 		// Possibly the task of a conversation being started right now.
 		return nil, errDeferred
 	}
-	channel, err := g.agentChannel(ctx, a.Name)
-	if err != nil {
-		return nil, err
-	}
-	return g.openConversation(ctx, a, channel, taskTitle(t), originKagent, t.ContextID)
+	return g.openConversation(ctx, a, taskTitle(t), originKagent, t.ContextID)
 }
 
 // taskTitle is the first user message of a task, which for a ScheduledRun
