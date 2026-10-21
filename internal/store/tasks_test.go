@@ -26,3 +26,27 @@ func TestTasks(t *testing.T) {
 		t.Fatalf("got %+v, %v, %v", got, ok, err)
 	}
 }
+
+func TestUnsettledTasks(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	for id, state := range map[string]string{
+		"working": "TASK_STATE_WORKING", "waiting": "TASK_STATE_INPUT_REQUIRED",
+		"done": "TASK_STATE_COMPLETED", "failed": "TASK_STATE_FAILED", "canceled": "TASK_STATE_CANCELED",
+	} {
+		if err := s.PutTask(ctx, store.TaskRecord{TaskID: id, Agent: "a", ContextID: "c", State: state}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.UnsettledTasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, r := range got {
+		ids[r.TaskID] = true
+	}
+	if len(ids) != 2 || !ids["working"] || !ids["waiting"] {
+		t.Fatalf("unsettled = %v", ids)
+	}
+}

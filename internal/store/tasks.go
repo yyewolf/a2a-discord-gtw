@@ -53,3 +53,28 @@ func (s *Store) PutTask(ctx context.Context, r TaskRecord) error {
 	}
 	return nil
 }
+
+// UnsettledTasks are the recorded tasks not in a final state: still
+// working, or waiting for input.
+func (s *Store) UnsettledTasks(ctx context.Context) ([]TaskRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT task_id, agent, context_id, state, posted_len, request_key, updated_at FROM tasks
+		 WHERE state NOT IN ('TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED')
+		 ORDER BY updated_at`)
+	if err != nil {
+		return nil, fmt.Errorf("store: unsettled tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []TaskRecord
+	for rows.Next() {
+		var r TaskRecord
+		if err := rows.Scan(&r.TaskID, &r.Agent, &r.ContextID, &r.State, &r.PostedLen, &r.RequestKey, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("store: unsettled tasks: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: unsettled tasks: %w", err)
+	}
+	return out, nil
+}
