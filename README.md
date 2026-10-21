@@ -13,8 +13,12 @@ A2A v1, which is what kagent 1.0 serves.
 
 - **One channel per agent.** The bot creates a text channel for each
   configured agent inside the category, named after it and with the agent's
-  description as its topic. A channel you rename is kept; one you delete is
-  recreated on the next start.
+  description as its topic. A channel you rename is kept; one you delete, or
+  move out of the category, is replaced right away. Channels outside the
+  category are ignored. If a channel cannot be created (most often: the bot
+  lacks Manage Channels on the category), the other agents keep working, the
+  error says what is missing, and the bot retries with backoff and whenever
+  something needs that channel.
 - **Start a conversation** by writing in an agent's channel: the bot opens a
   thread on your message and the reply streams into it. Or use
   `/ask prompt:<text>` — inside an agent's channel it goes to that agent,
@@ -27,16 +31,40 @@ A2A v1, which is what kagent 1.0 serves.
   button per choice (a menu when several can be picked, and "Other…" for free
   text); tool approvals get Approve / Reject per tool. The message pings the
   owners. When there is a single question you can also just type the answer
-  in the thread.
+  in the thread; anything else typed there brings the buttons back. However a
+  request is answered — button, typed reply, or in kagent's own UI — its
+  buttons are then removed, and a click on an outdated button is refused.
 - **Tasks you did not start.** For agents with `watch: true` — for example
   ones run by a kagent ScheduledRun — the bot polls kagent and posts new tasks
   in the agent's channel as conversations of their own, with their reply,
   their final state and their questions. History from before the first start
   is not replayed.
 
-State (which channel and thread belong to what, and what was already posted)
-lives in a small SQLite database, so a restart neither loses threads nor posts
-anything twice.
+- **Nothing falls through the cracks.** Every task the bot has seen is
+  recorded, with how much of its reply was already posted. Each poll
+  (`watch.interval`) follows up every agent's unsettled tasks, so a reply
+  whose stream was cut — kagent restarting, the connection dropping, this
+  process restarting — still lands in its thread, from where it stopped. A
+  stream silent for 5 minutes is let go the same way, with a note in the
+  thread. A thread whose first turn failed before kagent answered still
+  works: the next reply starts the conversation afresh.
+
+State (which channel and thread belong to what, what was posted for each
+task, which messages carry a request's buttons) lives in a small SQLite
+database. Records of settled tasks are pruned after 30 days; the
+thread-to-conversation mapping is kept.
+
+### Limits that come from Discord
+
+- A menu holds 25 options: a question with more choices shows the first 25
+  and says so; "Other…" takes any answer.
+- A message holds five rows of components: approvals with up to four tool
+  calls get a row per call, more than four only get Approve all / Reject
+  all, and the message says why.
+- Messages are split at 2000 characters, on paragraph, line or word
+  boundaries, keeping code blocks intact.
+- Discord gives three seconds to answer a button: modals open at once and
+  the answer is checked against kagent on submit.
 
 ## Discord setup
 
@@ -105,7 +133,10 @@ docker run -d --name a2a-discord-gtw \
 
 The image is `FROM scratch`, runs as UID/GID 65532 and only writes to
 `/data`. `GET /healthz` answers while the process runs; `GET /readyz` also
-checks the Discord connection, the database and that kagent answers.
+checks the Discord connection, the database, that every agent answers in
+kagent, and that every agent has its channel (naming the ones that do not,
+and why). On SIGTERM the bot stops taking work, lets the turns in flight wind
+down for up to ten seconds, then disconnects; a second signal exits at once.
 
 In Kubernetes, run one replica (two would both answer every message) next to
 kagent, mount the configuration from a ConfigMap and the token from a Secret,
