@@ -229,9 +229,12 @@ func (r *relay) finish(ctx context.Context, streamErr error) error {
 		full = r.task
 	}
 	if r.transcript.Text() == "" && full.Status.State != a2a.TaskStateInputRequired {
-		// Nothing streamed: show the stored reply, or the failure reason.
-		r.transcript.Add(&a2a.TaskArtifactUpdateEvent{Artifact: &a2a.Artifact{ID: "final", Parts: a2a.ContentParts{a2a.NewTextPart(kagent.TaskText(full))}}})
-		r.flush(ctx, true)
+		// Nothing streamed: show the stored reply, or the failure reason,
+		// minus what earlier turns of the task already posted.
+		if text := []rune(kagent.TaskText(full)); r.base < len(text) {
+			r.transcript.Add(&a2a.TaskArtifactUpdateEvent{Artifact: &a2a.Artifact{ID: "final", Parts: a2a.ContentParts{a2a.NewTextPart(string(text[r.base:]))}}})
+			r.flush(ctx, true)
+		}
 	}
 	r.g.showState(ctx, r.conv, full.Status.State)
 	return r.g.settle(ctx, r.agent, r.conv, full, len([]rune(kagent.TaskText(full))))

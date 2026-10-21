@@ -271,3 +271,38 @@ func TestTypedReplyToAnApprovalPostsTheButtons(t *testing.T) {
 		t.Fatalf("thread = %+v", got)
 	}
 }
+
+// A resumed turn that streams no text posts only what is new in the task.
+func TestResumedTurnPostsOnlyNewText(t *testing.T) {
+	h := newHarness(t)
+	h.ensure()
+	agent := h.agents["claude-assistant"]
+	msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(""))
+	msg.Metadata = map[string]any{kagent.HITLExtension: askUser(map[string]any{"question": "Go?", "choices": []string{"Yes", "No"}})}
+	before := &a2a.Artifact{ID: "a", Parts: a2a.ContentParts{a2a.NewTextPart("Checked the build.")}}
+	agent.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		return []a2a.Event{
+			&a2a.TaskArtifactUpdateEvent{TaskID: "t1", ContextID: "ctx-1", Artifact: before},
+			&a2a.Task{ID: "t1", ContextID: "ctx-1", Artifacts: []*a2a.Artifact{before}, Status: a2a.TaskStatus{State: a2a.TaskStateInputRequired, Message: msg}},
+		}, nil
+	}
+	thread := h.say(h.channel("claude-assistant"), ownerID, "go")
+	got := h.discord.in(thread)
+	agent.onSend = func(*a2a.Message) ([]a2a.Event, error) {
+		// The resumed stream carries only the final task.
+		return []a2a.Event{&a2a.Task{
+			ID: "t1", ContextID: "ctx-1", Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			Artifacts: []*a2a.Artifact{before, {ID: "b", Parts: a2a.ContentParts{a2a.NewTextPart(" Pushed.")}}},
+		}}, nil
+	}
+	h.gw.HandleInteraction(context.Background(), &fakeInteraction{user: ownerID, customID: component(t, got[len(got)-1], render.KindChoice, 0), msg: on(got[len(got)-1])})
+	got = h.discord.in(thread)
+	if last := got[len(got)-1].Content; last != "Pushed." {
+		t.Fatalf("thread = %+v", got)
+	}
+	for _, m := range got[1:] {
+		if strings.Contains(m.Content, "Checked the build.") {
+			t.Fatalf("earlier text posted again: %+v", got)
+		}
+	}
+}
